@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Subtitle Adjuster</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+            box-sizing: border-box;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+        }
+        .drop-zone {
+            border: 2px dashed #ccc;
+            border-radius: 4px;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+            background-color: #fafafa;
+            flex-shrink: 0;
+        }
+        .drop-zone.dragover {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        .drop-zone .file-info {
+            color: #666;
+            font-size: 0.9em;
+            word-break: break-all;
+            white-space: pre-line;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
+        button {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 4px;
+            background-color: #2196f3;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            flex: 1;
+            height: 36px;
+            line-height: 1;
+        }
+        button:hover:not(:disabled) {
+            background-color: #1976d2;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+        .time-adjustment {
+            margin: 20px 0;
+            flex-shrink: 0;
+        }
+        input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+            flex-shrink: 0;
+            word-break: break-word;
+        }
+        .status.success {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            display: block;
+        }
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            display: block;
+        }
+        .selected-path {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            word-break: break-all;
+            flex-shrink: 0;
+        }
+        h1 {
+            margin-top: 0;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Subtitle Adjuster</h1>
+        
+        <div class="button-group">
+            <button id="selectFile">Select File(s)</button>
+            <button id="selectFolder">Select Folder</button>
+        </div>
+
+        <div class="drop-zone" id="dropZone">
+            <p id="dropZoneHint">Drag and drop subtitle file(s) (.ass or .srt) or folder here</p>
+            <div class="file-info" id="dropZoneInfo"></div>
+        </div>
+
+        <div id="selectedPath" class="selected-path" style="display: none;">
+            Selected: <span id="pathText"></span>
+        </div>
+
+        <div class="time-adjustment">
+            <label for="adjustment">Time Adjustment (milliseconds):</label>
+            <input type="number" id="adjustment" placeholder="Enter time adjustment in milliseconds">
+            <p style="color: #666; font-size: 0.9em; margin: 0;">
+                Positive values delay subtitles, negative values advance them<br>
+                Minimum adjustment: 10ms (absolute value)
+            </p>
+        </div>
+
+        <div class="button-group">
+            <button id="process" disabled>Process Subtitles</button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        const { ipcRenderer } = require('electron');
+        
+        let selectedPaths = [];
+
+        // Function to validate and update process button state
+        function updateProcessButtonState() {
+            const processButton = document.getElementById('process');
+            const adjustment = document.getElementById('adjustment').value;
+            const isValid = selectedPaths.length > 0 && 
+                          adjustment && 
+                          !isNaN(parseInt(adjustment)) && 
+                          Math.abs(parseInt(adjustment)) >= 10;
+            processButton.disabled = !isValid;
+        }
+
+        // File/Folder selection
+        document.getElementById('selectFile').addEventListener('click', async () => {
+            const paths = await ipcRenderer.invoke('select-file');
+            if (paths && paths.length > 0) {
+                selectedPaths = paths;
+                updateSelectedPath(paths.length);
+                updateProcessButtonState();
+                // Clear any error messages
+                const status = document.getElementById('status');
+                status.className = 'status';
+                status.textContent = '';
+            }
+        });
+
+        document.getElementById('selectFolder').addEventListener('click', async () => {
+            const result = await ipcRenderer.invoke('select-folder');
+            if (result) {
+                selectedPaths = [result.path];
+                updateSelectedPath(result.assCount);
+                updateProcessButtonState();
+                // Clear any error messages
+                const status = document.getElementById('status');
+                status.className = 'status';
+                status.textContent = '';
+            }
+        });
+
+        // Time adjustment input handling
+        const adjustmentInput = document.getElementById('adjustment');
+        adjustmentInput.addEventListener('input', updateProcessButtonState);
+        adjustmentInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !document.getElementById('process').disabled) {
+                document.getElementById('process').click();
+            }
+        });
+
+        // Drag and drop
+        const dropZone = document.getElementById('dropZone');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const items = e.dataTransfer.items;
+            if (items && items.length > 0) {
+                const { webUtils } = require('electron');
+                const filePaths = [];
+                
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file) {
+                            try {
+                                const filePath = webUtils.getPathForFile(file);
+                                filePaths.push(filePath);
+                            } catch (error) {
+                                console.error('Error getting file path:', error);
+                            }
+                        }
+                    }
+                }
+
+                if (filePaths.length > 0) {
+                    ipcRenderer.invoke('handle-drop', filePaths).then(result => {
+                        if (result.success) {
+                            selectedPaths = result.paths;
+                            updateSelectedPath(result.fileCount);
+                            // Clear any error messages
+                            const status = document.getElementById('status');
+                            status.className = 'status';
+                            status.textContent = '';
+                            updateProcessButtonState();
+                        } else {
+                            const status = document.getElementById('status');
+                            status.className = 'status error';
+                            status.textContent = result.message;
+                        }
+                    }).catch(error => {
+                        console.error('Drop error:', error);
+                        const status = document.getElementById('status');
+                        status.className = 'status error';
+                        status.textContent = 'Error processing dropped items: ' + error.message;
+                    });
+                }
+            }
+        }
+
+        function updateSelectedPath(assCount) {
+            if (selectedPaths.length > 0) {
+                const dropZoneInfo = document.getElementById('dropZoneInfo');
+                const dropZoneHint = document.getElementById('dropZoneHint');
+                const selectedPathDiv = document.getElementById('selectedPath');
+                selectedPathDiv.style.display = 'none';
+                
+                dropZoneHint.style.display = 'none';
+                let infoText = `Found ${assCount} subtitle file${assCount !== 1 ? 's' : ''} to process`;
+                dropZoneInfo.textContent = infoText;
+            }
+        }
+
+        // Process subtitles
+        document.getElementById('process').addEventListener('click', async () => {
+            const adjustment = parseInt(document.getElementById('adjustment').value);
+            const status = document.getElementById('status');
+            
+            if (selectedPaths.length === 0) {
+                status.className = 'status error';
+                status.textContent = 'Please select at least one file or folder';
+                return;
+            }
+            
+            if (isNaN(adjustment)) {
+                status.className = 'status error';
+                status.textContent = 'Please enter a valid time adjustment';
+                return;
+            }
+
+            if (Math.abs(adjustment) < 10) {
+                status.className = 'status error';
+                status.textContent = 'Time adjustment must be at least 10ms';
+                return;
+            }
+
+            try {
+                const result = await ipcRenderer.invoke('process-subtitles', {
+                    paths: selectedPaths,
+                    adjustment: adjustment
+                });
+
+                status.className = `status ${result.success ? 'success' : 'error'}`;
+                status.textContent = result.message;
+                
+                if (result.success) {
+                    document.getElementById('adjustment').value = '';
+                    updateProcessButtonState();
+                }
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = error.message;
+            }
+        });
+    </script>
+</body>
+</html> 
