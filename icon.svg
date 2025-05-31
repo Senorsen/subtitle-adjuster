@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+    <!-- Background circle -->
+    <circle cx="256" cy="256" r="240" fill="#2196F3"/>
+    
+    <!-- Subtitle lines -->
+    <g fill="white" font-family="Arial, sans-serif">
+        <!-- First line -->
+        <rect x="96" y="180" width="320" height="24" rx="4"/>
+        <!-- Second line -->
+        <rect x="96" y="220" width="320" height="24" rx="4"/>
+        <!-- Third line -->
+        <rect x="96" y="260" width="320" height="24" rx="4"/>
+        
+        <!-- Timestamp -->
+        <text x="256" y="340" font-size="32" text-anchor="middle" font-weight="bold">00:01:02.456</text>
+    </g>
+</svg> 
