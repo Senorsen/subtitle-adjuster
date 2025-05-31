@@ -18,10 +18,7 @@
         .container {
             max-width: 600px;
             margin: 0 auto;
-            background-color: white;
             padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
@@ -75,13 +72,65 @@
             margin: 20px 0;
             flex-shrink: 0;
         }
-        input[type="number"] {
-            width: 100%;
-            padding: 8px;
+        .time-buttons {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin: 10px 0;
+        }
+        .time-buttons button {
+            padding: 4px;
+            font-size: 12px;
+            background-color: #e3f2fd;
+            color: #1976d2;
+            border: 1px solid #90caf9;
+            height: 30px;
+            width: 60px;
+        }
+        .time-buttons button:hover:not(:disabled) {
+            background-color: #bbdefb;
+        }
+        .time-buttons button.reverse {
+            background-color: #fff3e0;
+            color: #f57c00;
+            border: 1px solid #ffb74d;
+            width: 40px;
+            flex: 1;
+        }
+        .time-buttons button.reverse:hover:not(:disabled) {
+            background-color: #ffe0b2;
+        }
+        .time-buttons button.clear {
+            background-color: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef9a9a;
+            width: 40px;
+            flex: 1;
+        }
+        .time-buttons button.clear:hover:not(:disabled) {
+            background-color: #ffcdd2;
+        }
+        .time-label {
+            font-weight: 500;
+            color: #666;
+            margin-right: 8px;
+        }
+        .input-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 10px 0;
+        }
+        input[type="number"] {
+            width: 150px;
+            padding: 8px;
             border: 1px solid #ccc;
             border-radius: 4px;
             box-sizing: border-box;
+            flex: 1;
+        }
+        .direction-label {
+            flex: 3;
         }
         .status {
             padding: 10px;
@@ -134,7 +183,24 @@
 
         <div class="time-adjustment">
             <label for="adjustment">Time Adjustment (milliseconds):</label>
-            <input type="number" id="adjustment" placeholder="Enter time adjustment in milliseconds">
+            <div class="input-group">
+                <input type="number" id="adjustment" placeholder="Input time" step="10">
+                <span class="direction-label"></span>
+                <button class="time-btn reverse" id="reverseSign">Reverse</button>
+                <button class="time-btn clear" id="clearValue">Clear</button>
+            </div>
+            <div class="time-buttons">
+                <span class="time-label">Delay:</span>
+                <button class="time-btn" data-value="100">+100</button>
+                <button class="time-btn" data-value="500">+500</button>
+                <button class="time-btn" data-value="1000">+1000</button>
+                <button class="time-btn" data-value="5000">+5000</button>
+                <span class="time-label" style="margin-left: 8px;">Advance:</span>
+                <button class="time-btn" data-value="-100">-100</button>
+                <button class="time-btn" data-value="-500">-500</button>
+                <button class="time-btn" data-value="-1000">-1000</button>
+                <button class="time-btn" data-value="-5000">-5000</button>
+            </div>
             <p style="color: #666; font-size: 0.9em; margin: 0;">
                 Positive values delay subtitles, negative values advance them<br>
                 Minimum adjustment: 10ms (absolute value)
@@ -152,6 +218,27 @@
         const { ipcRenderer } = require('electron');
         
         let selectedPaths = [];
+
+        // Listen for command line path
+        ipcRenderer.on('command-line-path', (event, result) => {
+            if (result.files) {
+                selectedPaths = result.files;
+                updateSelectedPath(result.assCount);
+                updateProcessButtonState();
+                // Clear any error messages
+                const status = document.getElementById('status');
+                status.className = 'status';
+                status.textContent = '';
+            } else if (result.paths) {
+                selectedPaths = result.paths;
+                updateSelectedPath(result.fileCount);
+                updateProcessButtonState();
+                // Clear any error messages
+                const status = document.getElementById('status');
+                status.className = 'status';
+                status.textContent = '';
+            }
+        });
 
         // Function to validate and update process button state
         function updateProcessButtonState() {
@@ -181,7 +268,7 @@
         document.getElementById('selectFolder').addEventListener('click', async () => {
             const result = await ipcRenderer.invoke('select-folder');
             if (result) {
-                selectedPaths = [result.path];
+                selectedPaths = result.files;
                 updateSelectedPath(result.assCount);
                 updateProcessButtonState();
                 // Clear any error messages
@@ -193,11 +280,54 @@
 
         // Time adjustment input handling
         const adjustmentInput = document.getElementById('adjustment');
-        adjustmentInput.addEventListener('input', updateProcessButtonState);
+        const directionLabel = document.querySelector('.direction-label');
+        
+        function updateDirectionLabel() {
+            const value = parseInt(adjustmentInput.value) || 0;
+            if (value === 0) {
+                directionLabel.textContent = '';
+            } else if (value > 0) {
+                directionLabel.textContent = `${value}ms (Delay)`;
+            } else {
+                directionLabel.textContent = `${value}ms (Advance)`;
+            }
+        }
+
+        adjustmentInput.addEventListener('input', () => {
+            updateDirectionLabel();
+            updateProcessButtonState();
+        });
         adjustmentInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !document.getElementById('process').disabled) {
                 document.getElementById('process').click();
             }
+        });
+
+        // Time adjustment buttons
+        document.querySelectorAll('.time-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                const currentValue = parseInt(adjustmentInput.value) || 0;
+                if (button.id === 'reverseSign') {
+                    adjustmentInput.value = -currentValue;
+                } else if (button.id === 'clearValue') {
+                    adjustmentInput.value = '';
+                } else {
+                    const adjustment = parseInt(button.dataset.value);
+                    // Ensure the new value is a multiple of 10
+                    const newValue = currentValue + adjustment;
+                    adjustmentInput.value = Math.round(newValue / 10) * 10;
+                }
+                updateDirectionLabel();
+                updateProcessButtonState();
+            });
+        });
+
+        // Ensure input value is always a multiple of 10
+        adjustmentInput.addEventListener('change', () => {
+            const value = parseInt(adjustmentInput.value) || 0;
+            adjustmentInput.value = Math.round(value / 10) * 10;
+            updateDirectionLabel();
+            updateProcessButtonState();
         });
 
         // Drag and drop

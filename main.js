@@ -6,14 +6,15 @@ let mainWindow;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
-        width: 800,
+        width: 600,
         height: 600,
         resizable: false,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
             webSecurity: true
-        }
+        },
+        icon: path.join(__dirname, 'icon.ico')
     });
 
     // Remove default menu
@@ -38,6 +39,48 @@ function createWindow() {
             event.preventDefault();
         }
     });
+
+    // Process command line argument if present
+    // In development: electron . path/to/file
+    // In production: SubtitleAdjuster.exe path/to/file
+    const isDev = !app.isPackaged;
+    const argPath = isDev ? process.argv[2] : process.argv[1];
+    if (argPath) {
+        console.log('argPath', argPath);
+        mainWindow.webContents.on('did-finish-load', () => {
+            processPath(argPath).then(result => {
+                if (result) {
+                    mainWindow.webContents.send('command-line-path', result);
+                }
+            });
+        });
+    }
+}
+
+// Function to process a path from command line
+async function processPath(filePath) {
+    try {
+        const stats = fs.statSync(filePath);
+        if (stats.isDirectory()) {
+            const files = fs.readdirSync(filePath)
+                .filter(file => file.toLowerCase().endsWith('.ass') || file.toLowerCase().endsWith('.srt'))
+                .map(file => path.join(filePath, file));
+            return { 
+                path: filePath, 
+                assCount: files.length,
+                files: files 
+            };
+        } else if (filePath.toLowerCase().endsWith('.ass') || filePath.toLowerCase().endsWith('.srt')) {
+            return {
+                success: true,
+                paths: [filePath],
+                fileCount: 1
+            };
+        }
+    } catch (error) {
+        console.error('Error processing command line path:', error);
+    }
+    return null;
 }
 
 app.whenReady().then(createWindow);
@@ -69,8 +112,13 @@ ipcMain.handle('select-folder', async () => {
     });
     if (result.filePaths[0]) {
         const files = fs.readdirSync(result.filePaths[0])
-            .filter(file => file.toLowerCase().endsWith('.ass') || file.toLowerCase().endsWith('.srt'));
-        return { path: result.filePaths[0], assCount: files.length };
+            .filter(file => file.toLowerCase().endsWith('.ass') || file.toLowerCase().endsWith('.srt'))
+            .map(file => path.join(result.filePaths[0], file));
+        return { 
+            path: result.filePaths[0], 
+            assCount: files.length,
+            files: files 
+        };
     }
     return null;
 });
