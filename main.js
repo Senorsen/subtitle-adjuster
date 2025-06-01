@@ -14,7 +14,7 @@ function createWindow() {
             contextIsolation: false,
             webSecurity: true
         },
-        icon: path.join(__dirname, 'icon.ico')
+        icon: path.join(__dirname, 'build/icon.ico')
     });
 
     // Remove default menu

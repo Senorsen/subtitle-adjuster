@@ -1,9 +1,10 @@
 const sharp = require('sharp');
 const fs = require('fs');
 const { encode } = require('ico-endec');
+const path = require('path')
 
-const inputSvg = 'icon.svg';
-const outputIco = 'build/icon.ico';
+const inputSvg = path.join(__dirname, '../assets/icon.svg');
+const outputIco = path.join(__dirname, '../build/icon.ico');
 
 (async () => {
   // Generate PNG buffers at multiple sizes for ICO

@@ -1,6 +1,8 @@
 # Subtitle Adjuster
 
-A GUI application for adjusting subtitle timings in .ass files. Built with Electron.
+A GUI application for adjusting subtitle timings in .ass and .srt files. Built with Electron.
+
+This project was mostly written by AI to achieve some personal adhoc needs - it works after several tweaks and debugging.
 
 ## Features
 
@@ -9,6 +11,8 @@ A GUI application for adjusting subtitle timings in .ass files. Built with Elect
 - Drag and drop support
 - File/folder selection via buttons
 - Real-time feedback on processing status
+- Windows context menu integration
+- Support for both classic and modern Windows 11 context menus
 
 ## Installation
 
@@ -29,6 +33,7 @@ A GUI application for adjusting subtitle timings in .ass files. Built with Elect
 2. Select a subtitle file or folder using one of these methods:
    - Click "Select File" or "Select Folder" buttons
    - Drag and drop a file or folder onto the application window
+   - Right-click on .ass or .srt subtitle file(s) or folder and select "Adjust Subtitles"
 3. Enter the time adjustment in milliseconds:
    - Positive values delay the subtitles
    - Negative values advance the subtitles
@@ -36,14 +41,40 @@ A GUI application for adjusting subtitle timings in .ass files. Built with Elect
 
 ## Building
 
-To build the application for your platform:
+### Windows
+To build the application for Windows installer (NSIS):
 
 ```bash
 npm run build
 ```
 
-The built application will be available in the `dist` directory.
+The built installer will be available in the `dist` directory.
+
+### macOS
+To build the application for macOS:
+
+```bash
+npm run build:mac
+```
+
+The built application will be available in the `dist` directory as a `.dmg` file.
+
+Note: macOS builds can only be created on a macOS system due to Apple's code signing requirements.
+
+## Development
+
+To start the application in development mode:
+
+```bash
+npm start
+```
+
+To convert the SVG icon to ICO format (Windows only):
+
+```bash
+npm run ico
+```
 
 ## License
 
-ISC 
+MIT License - see the [LICENSE](LICENSE) file for details. 

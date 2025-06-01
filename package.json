@@ -6,15 +6,16 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder -w",
-    "build:mac": "electron-builder -m"
+    "build:mac": "electron-builder -m",
+    "ico": "node scripts/convert-svg-to-ico.js"
   },
   "keywords": [
     "subtitles",
     "electron",
     "gui"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Senorsen",
+  "license": "MIT",
   "dependencies": {
     "electron-store": "^8.1.0"
   },
@@ -41,7 +42,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Subtitle Adjuster",
-      "include": "installer.nsh",
+      "include": "installer/nsis.nsh",
       "perMachine": true,
       "allowElevation": true
     }
