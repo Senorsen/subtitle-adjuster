@@ -9,7 +9,10 @@ on:
 
 jobs:
   build-check:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     if: "!startsWith(github.ref, 'refs/tags/')"
     steps:
       - name: Checkout code
@@ -23,13 +26,21 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Windows installer
-        run: npm run build
+      - name: Build installer
+        run: |
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            npm run build -- --publish=never
+          else
+            npm run build:mac -- --publish=never
+          fi
 
   release:
     needs: build-check
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,12 +53,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build Windows installer
-        run: npm run build
+      - name: Build installer
+        run: |
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            npm run build -- --publish=never
+          else
+            npm run build:mac -- --publish=never
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: "dist/*.exe"
+          files: |
+            dist/*.exe
+            dist/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
