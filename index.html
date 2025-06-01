@@ -366,7 +366,6 @@
             
             const items = e.dataTransfer.items;
             if (items && items.length > 0) {
-                const { webUtils } = require('electron');
                 const filePaths = [];
                 
                 for (let i = 0; i < items.length; i++) {
@@ -375,7 +374,7 @@
                         const file = item.getAsFile();
                         if (file) {
                             try {
-                                const filePath = webUtils.getPathForFile(file);
+                                const filePath = file.path;
                                 filePaths.push(filePath);
                             } catch (error) {
                                 console.error('Error getting file path:', error);
