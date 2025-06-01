@@ -25,6 +25,7 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+        shell: bash
 
       - name: Build installer
         run: |
@@ -38,6 +39,7 @@ jobs:
             npm run build:icon:linux
             npm run build:linux -- --publish=never
           fi
+        shell: bash
 
   release:
     needs: build-check
@@ -57,6 +59,7 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+        shell: bash
 
       - name: Build installer
         run: |
@@ -70,6 +73,7 @@ jobs:
             npm run build:icon:linux
             npm run build:linux -- --publish=never
           fi
+        shell: bash
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
