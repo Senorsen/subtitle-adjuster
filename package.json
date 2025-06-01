@@ -7,6 +7,7 @@
     "start": "electron .",
     "build": "electron-builder -w",
     "build:mac": "electron-builder -m",
+    "build:linux": "electron-builder -l",
     "ico": "node scripts/convert-svg-to-ico.js"
   },
   "keywords": [
@@ -31,6 +32,30 @@
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.icns",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Utility"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "asar": true,
     "directories": {
