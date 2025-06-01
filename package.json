@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder -w",
-    "build:mac": "electron-builder -m",
+    "build:mac": "electron-builder -m --universal",
     "build:linux": "electron-builder -l",
     "build:icon": "node scripts/convert-svg-to-ico.js",
     "build:icon:mac": "node scripts/convert-svg-to-icns.js",
@@ -38,7 +38,8 @@
     "mac": {
       "target": "dmg",
       "icon": "build/icon.icns",
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "arch": ["arm64", "x64"]
     },
     "linux": {
       "target": "AppImage",
