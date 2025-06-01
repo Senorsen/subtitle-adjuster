@@ -19,14 +19,8 @@ async function convertToPNGs() {
         await sharp(inputSvg)
             .resize(size, size)
             .png()
-            .toFile(path.join(outputDir, `icon_${size}.png`));
+            .toFile(path.join(outputDir, `icon_${size}x${size}.png`));
     }
-
-    // Also create the main icon.png (512x512) for Linux
-    await sharp(inputSvg)
-        .resize(512, 512)
-        .png()
-        .toFile(path.join(outputDir, 'icon.png'));
 }
 
 // Main execution

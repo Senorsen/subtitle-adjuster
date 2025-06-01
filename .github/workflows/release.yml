@@ -21,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: npm install
@@ -29,10 +29,13 @@ jobs:
       - name: Build installer
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            npm run build:icon
             npm run build -- --publish=never
           elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+            npm run build:icon:mac
             npm run build:mac -- --publish=never
           else
+            npm run build:icon:linux
             npm run build:linux -- --publish=never
           fi
 
@@ -50,7 +53,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install dependencies
         run: npm install
@@ -58,10 +61,13 @@ jobs:
       - name: Build installer
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            npm run build:icon
             npm run build -- --publish=never
           elif [ "${{ matrix.os }}" == "macos-latest" ]; then
+            npm run build:icon:mac
             npm run build:mac -- --publish=never
           else
+            npm run build:icon:linux
             npm run build:linux -- --publish=never
           fi
 
