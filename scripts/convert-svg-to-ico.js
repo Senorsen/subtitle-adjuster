@@ -5,6 +5,11 @@ const path = require('path')
 
 const inputSvg = path.join(__dirname, '../assets/icon.svg');
 const outputIco = path.join(__dirname, '../build/icon.ico');
+const buildDir = path.join(__dirname, '../build');
+
+if (!fs.existsSync(buildDir)) {
+  fs.mkdirSync(buildDir, { recursive: true });
+}
 
 (async () => {
   // Generate PNG buffers at multiple sizes for ICO
