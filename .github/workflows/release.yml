@@ -11,7 +11,7 @@ jobs:
   build-check:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     if: "!startsWith(github.ref, 'refs/tags/')"
     steps:
@@ -30,8 +30,10 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             npm run build -- --publish=never
-          else
+          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
             npm run build:mac -- --publish=never
+          else
+            npm run build:linux -- --publish=never
           fi
 
   release:
@@ -39,7 +41,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout code
@@ -57,8 +59,10 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             npm run build -- --publish=never
-          else
+          elif [ "${{ matrix.os }}" == "macos-latest" ]; then
             npm run build:mac -- --publish=never
+          else
+            npm run build:linux -- --publish=never
           fi
 
       - name: Create GitHub Release
@@ -67,5 +71,7 @@ jobs:
           files: |
             dist/*.exe
             dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
