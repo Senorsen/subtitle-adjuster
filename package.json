@@ -8,7 +8,10 @@
     "build": "electron-builder -w",
     "build:mac": "electron-builder -m",
     "build:linux": "electron-builder -l",
-    "ico": "node scripts/convert-svg-to-ico.js"
+    "build:icon": "node scripts/convert-svg-to-ico.js",
+    "build:icon:mac": "node scripts/convert-svg-to-icns.js",
+    "build:icon:linux": "node scripts/convert-svg-to-png.js",
+    "build:icons": "npm run build:icon && npm run build:icon:mac && npm run build:icon:linux"
   },
   "keywords": [
     "subtitles",
