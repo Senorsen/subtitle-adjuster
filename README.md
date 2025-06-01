@@ -15,17 +15,16 @@ This project was mostly written by AI to achieve some personal adhoc needs - it 
 - Support for both classic and modern Windows 11 context menus
 
 ## Installation
+Download the latest release from the Releases page and run the installer executable.
 
-1. Make sure you have [Node.js](https://nodejs.org/) installed
-2. Clone this repository
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Start the application:
-   ```bash
-   npm start
-   ```
+### De-quarantining on macOS
+After installing the application, you may need to remove the quarantine attribute that macOS applies to downloaded applications. To do this, open Terminal and run:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Subtitle\ Adjuster.app
+```
+
+This will allow the application to run without the security warning.
 
 ## Usage
 
@@ -40,6 +39,18 @@ This project was mostly written by AI to achieve some personal adhoc needs - it 
 4. Click "Process Subtitles" to apply the changes
 
 ## Building
+
+### Prepare
+
+1. Make sure you have [Node.js](https://nodejs.org/) installed
+2. Clone this repository
+3. Install dependencies:
+   ```bash
+   npm install
+   ```
+4. Start the application:
+   ```bash
+   npm start
 
 ### Windows
 To build the application for Windows installer (NSIS):
