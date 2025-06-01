@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
+let chatWindow;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -40,6 +41,15 @@ function createWindow() {
         }
     });
 
+    // Close all windows when main window is closed
+    mainWindow.on('closed', () => {
+        if (chatWindow) {
+            chatWindow.removeAllListeners();
+            chatWindow.close();
+        }
+        app.quit();
+    });
+
     // Process command line argument if present
     // In development: electron . path/to/file
     // In production: SubtitleAdjuster.exe path/to/file
@@ -55,6 +65,78 @@ function createWindow() {
             });
         });
     }
+
+    // Add chat button handler
+    ipcMain.handle('open-chat', () => {
+        if (chatWindow) {
+            chatWindow.focus();
+            return;
+        }
+
+        // Get main window bounds
+        const mainBounds = mainWindow.getBounds();
+        const chatWidth = Math.floor(mainBounds.width * 2/3);
+        const chatHeight = mainBounds.height;
+        const chatX = mainBounds.x + mainBounds.width;
+        const chatY = mainBounds.y;
+
+        chatWindow = new BrowserWindow({
+            width: chatWidth,
+            height: chatHeight,
+            x: chatX,
+            y: chatY,
+            resizable: false,
+            webPreferences: {
+                nodeIntegration: true,
+                contextIsolation: false,
+                webSecurity: true,
+                experimentalFeatures: true
+            },
+            icon: path.join(__dirname, 'build/icon.ico')
+        });
+
+        chatWindow.loadFile('chat.html');
+
+        // Add F12 support for DevTools in chat window
+        chatWindow.webContents.on('before-input-event', (event, input) => {
+            if (input.key === 'F12') {
+                chatWindow.webContents.toggleDevTools();
+                event.preventDefault();
+            }
+        });
+
+        // Update chat window position when main window moves
+        const moveHandler = () => {
+            if (chatWindow && !chatWindow.isDestroyed()) {
+                const newBounds = mainWindow.getBounds();
+                chatWindow.setPosition(newBounds.x + newBounds.width, newBounds.y);
+            }
+        };
+        mainWindow.on('move', moveHandler);
+
+        // Keep windows together when either is focused
+        const mainFocusHandler = () => {
+            if (chatWindow && !chatWindow.isDestroyed()) {
+                chatWindow.moveTop();
+            }
+        };
+        mainWindow.on('focus', mainFocusHandler);
+
+        const chatFocusHandler = () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.moveTop();
+            }
+        };
+        chatWindow.on('focus', chatFocusHandler);
+
+        chatWindow.on('closed', () => {
+            // Remove all event listeners
+            mainWindow.removeListener('move', moveHandler);
+            mainWindow.removeListener('focus', mainFocusHandler);
+            chatWindow.removeListener('focus', chatFocusHandler);
+            chatWindow = null;
+        });
+    });
 }
 
 // Function to process a path from command line
@@ -106,19 +188,21 @@ ipcMain.handle('select-file', async () => {
     return result.filePaths;
 });
 
+// Handle file selection for chat interface
+ipcMain.handle('select-files', async (event, options) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile', 'multiSelections'],
+        filters: options?.filters || [{ name: 'Subtitle Files', extensions: ['ass', 'srt'] }]
+    });
+    return result.filePaths;
+});
+
 ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openDirectory']
     });
     if (result.filePaths[0]) {
-        const files = fs.readdirSync(result.filePaths[0])
-            .filter(file => file.toLowerCase().endsWith('.ass') || file.toLowerCase().endsWith('.srt'))
-            .map(file => path.join(result.filePaths[0], file));
-        return { 
-            path: result.filePaths[0], 
-            assCount: files.length,
-            files: files 
-        };
+        return result.filePaths[0];
     }
     return null;
 });
@@ -171,20 +255,40 @@ ipcMain.handle('handle-drop', async (event, filePaths) => {
     }
 });
 
-// Handle file processing
-ipcMain.handle('process-subtitles', async (event, { paths, adjustment }) => {
+// Handle file processing for chat interface
+ipcMain.handle('process-subtitles', async (event, { files, folder, delayMs }) => {
     try {
-        const files = Array.isArray(paths) ? paths : [paths];
-        for (const file of files) {
-            await processSubtitleFile(file, adjustment);
+        let filesToProcess = [];
+        
+        // If files are provided, use them
+        if (files && files.length > 0) {
+            filesToProcess = files;
         }
-        const action = adjustment >= 0 ? 'delayed' : 'advanced';
+        
+        // If folder is provided, scan for subtitle files
+        if (folder) {
+            const folderFiles = fs.readdirSync(folder)
+                .filter(file => file.toLowerCase().endsWith('.ass') || file.toLowerCase().endsWith('.srt'))
+                .map(file => path.join(folder, file));
+            filesToProcess.push(...folderFiles);
+        }
+        
+        if (filesToProcess.length === 0) {
+            throw new Error('No subtitle files found to process');
+        }
+        
+        // Process each file
+        for (const file of filesToProcess) {
+            await processSubtitleFile(file, delayMs);
+        }
+        
         return { 
             success: true, 
-            message: `${files.length} file${files.length !== 1 ? 's' : ''} processed successfully, ${action} ${Math.abs(adjustment)} ms` 
+            processedCount: filesToProcess.length,
+            message: `${filesToProcess.length} file${filesToProcess.length !== 1 ? 's' : ''} processed successfully`
         };
     } catch (error) {
-        return { success: false, message: error.message };
+        throw new Error(`Processing failed: ${error.message}`);
     }
 });
 

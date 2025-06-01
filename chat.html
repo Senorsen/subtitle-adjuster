@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Chat</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            background-color: #f5f5f5;
+        }
+        .chat-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            width: 100%;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            min-height: 0;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: auto;
+        }
+        .ai-message {
+            background-color: #f5f5f5;
+            margin-right: auto;
+        }
+        .input-container {
+            display: flex;
+            gap: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #messageInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        #sendButton {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #sendButton:hover {
+            background-color: #1976d2;
+        }
+        #sendButton:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.loading {
+            background-color: #e3f2fd;
+            color: #1976d2;
+            display: block;
+        }
+        .status.error {
+            background-color: #ffebee;
+            color: #c62828;
+            display: block;
+        }
+        .system-message {
+            background-color: #fff3e0;
+            color: #e65100;
+            margin: 10px auto;
+            text-align: center;
+            font-style: italic;
+            max-width: 90%;
+        }
+        .system-message.error {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-messages" id="chatMessages"></div>
+        <div class="input-container">
+            <input type="text" id="messageInput" placeholder="Type your message..." />
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { CreateMLCEngine } from 'https://esm.run/@mlc-ai/web-llm@0.2.79';
+        const { ipcRenderer } = require('electron');
+        let engine = null;
+        let currentState = {
+            selectedFiles: [],
+            selectedFolder: null,
+            delayTime: 0, // in milliseconds
+            pendingConfirmation: null
+        };
+
+        // Initialize the model
+        async function initializeModel() {
+            addMessage('Initializing model...', 'system');
+
+            try {
+                // Create engine with progress callback in engineConfig
+                const engineConfig = {
+                    initProgressCallback: (progress) => {
+                        if (progress.progress === 1) {
+                            updateLastSystemMessage('Model loaded successfully!');
+                            setTimeout(() => {
+                                removeLastSystemMessage();
+                            }, 2000);
+                        } else {
+                            const percent = Math.round(progress.progress * 100);
+                            let statusText = '';
+                            
+                            if (progress.text) {
+                                statusText = progress.text;
+                            } else {
+                                statusText = `Loading model: ${percent}%`;
+                            }
+                            
+                            updateLastSystemMessage(statusText);
+                        }
+                    }
+                };
+
+                engine = await CreateMLCEngine(
+                    "Qwen3-0.6B-q4f32_1-MLC",
+                    engineConfig
+                );
+                
+                // Immediately dismiss status and show welcome message
+                removeLastSystemMessage();
+                addMessage("Hello! I'm your Subtitle Adjuster AI Assistant. I can help you adjust subtitle timing - whether you need to delay subtitles that appear too early or advance them if they're running late. I can also assist with formatting issues, translation questions, or any other subtitle-related tasks. How can I help you today?", 'ai');
+            } catch (error) {
+                updateLastSystemMessage(`Error loading model: ${error.message}`, true);
+            }
+        }
+
+        // Initialize the model when the window loads
+        window.addEventListener('load', initializeModel);
+
+        // Focus on input when page loads
+        window.addEventListener('load', () => {
+            const messageInput = document.getElementById('messageInput');
+            messageInput.focus();
+        });
+
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const chatMessages = document.getElementById('chatMessages');
+
+        async function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || !engine) return;
+
+            // Add user message to chat
+            addMessage(message, 'user');
+            messageInput.value = '';
+
+            // Disable input while processing
+            messageInput.disabled = true;
+            sendButton.disabled = true;
+
+            try {
+                // Show processing status
+                addMessage('Generating response...', 'system');
+
+                // Create system prompt for the model about available tools
+                const systemPrompt = `You are a Subtitle Adjuster AI Assistant. You help users with subtitle timing adjustments and related tasks.
+
+AVAILABLE TOOLS (use these patterns in your response when appropriate):
+- [SELECT_FILES] - Use when user wants to select specific subtitle files (.ass/.srt)
+- [SELECT_FOLDER] - Use when user wants to select a folder containing subtitle files
+- [DELAY_TIME:value:unit] - Use to set delay time (moves subtitles later). Example: [DELAY_TIME:2:s] or [DELAY_TIME:500:ms]
+- [ADVANCE_TIME:value:unit] - Use to set advance time (moves subtitles earlier). Example: [ADVANCE_TIME:1.5:s] or [ADVANCE_TIME:300:ms]
+- [REVERSE] - Use to reverse the current delay/advance direction
+- [PROCESS] - Use to actually process the files after user confirms the settings
+
+TOOL USAGE GUIDELINES:
+1. If user mentions working with subtitle files/folders, intelligently decide between [SELECT_FILES] or [SELECT_FOLDER]
+2. If unclear whether they want files or folder, ASK first before calling any tool
+3. When user mentions timing adjustments (delay/advance), use appropriate timing tools
+4. Always explain what you're doing before using tools
+5. For timing, support both seconds (s) and milliseconds (ms)
+6. Only call [PROCESS] after user explicitly confirms they want to proceed
+
+Current state: ${JSON.stringify(currentState)}
+
+User message: "${message}"
+
+Respond naturally and use tools when appropriate:`;
+
+                // Get response from engine using completions API
+                const response = await engine.chat.completions.create({
+                    messages: [
+                        { role: "system", content: systemPrompt },
+                        { role: "user", content: message }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 1000,
+                });
+
+                // Remove the "Generating response..." message
+                removeLastSystemMessage();
+
+                const choice = response.choices[0];
+                const aiResponse = choice.message.content;
+                
+                // Add AI response
+                addMessage(aiResponse, 'ai');
+                
+                // Check for manual tool calls in the response
+                await parseAndExecuteToolCalls(aiResponse);
+            } catch (error) {
+                updateLastSystemMessage(`Error: ${error.message}`, true);
+            }
+
+            // Re-enable input
+            messageInput.disabled = false;
+            sendButton.disabled = false;
+            messageInput.focus();
+        }
+
+        function addMessage(text, sender) {
+            const messageDiv = document.createElement('div');
+            if (sender === 'system') {
+                messageDiv.className = 'message system-message';
+            } else {
+                messageDiv.className = `message ${sender}-message`;
+            }
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function updateLastSystemMessage(text, isError = false) {
+            const messages = chatMessages.querySelectorAll('.system-message');
+            if (messages.length > 0) {
+                const lastMessage = messages[messages.length - 1];
+                lastMessage.textContent = text;
+                if (isError) {
+                    lastMessage.classList.add('error');
+                } else {
+                    lastMessage.classList.remove('error');
+                }
+            } else {
+                addMessage(text, 'system');
+                if (isError) {
+                    const messages = chatMessages.querySelectorAll('.system-message');
+                    if (messages.length > 0) {
+                        messages[messages.length - 1].classList.add('error');
+                    }
+                }
+            }
+        }
+
+        function removeLastSystemMessage() {
+            const messages = chatMessages.querySelectorAll('.system-message');
+            if (messages.length > 0) {
+                const lastMessage = messages[messages.length - 1];
+                lastMessage.remove();
+            }
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Tool implementation functions
+        async function selectFiles() {
+            try {
+                const result = await ipcRenderer.invoke('select-files', {
+                    filters: [
+                        { name: 'Subtitle Files', extensions: ['ass', 'srt'] },
+                        { name: 'All Files', extensions: ['*'] }
+                    ]
+                });
+                
+                if (result && result.length > 0) {
+                    currentState.selectedFiles = result;
+                    return `Selected ${result.length} file(s):\n${result.map(f => `• ${f}`).join('\n')}`;
+                } else {
+                    return 'No files selected.';
+                }
+            } catch (error) {
+                return `Error selecting files: ${error.message}`;
+            }
+        }
+
+        async function selectFolder() {
+            try {
+                const result = await ipcRenderer.invoke('select-folder');
+                
+                if (result) {
+                    currentState.selectedFolder = result;
+                    return `Selected folder: ${result}`;
+                } else {
+                    return 'No folder selected.';
+                }
+            } catch (error) {
+                return `Error selecting folder: ${error.message}`;
+            }
+        }
+
+        function setDelayTime(value, unit) {
+            const msValue = convertToMs(value, unit);
+            currentState.delayTime = Math.abs(msValue);
+            const confirmation = `Set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER. Do you want to proceed with this setting?`;
+            currentState.pendingConfirmation = {
+                action: 'delay',
+                value: currentState.delayTime,
+                direction: 'later'
+            };
+            return confirmation;
+        }
+
+        function setAdvanceTime(value, unit) {
+            const msValue = convertToMs(value, unit);
+            currentState.delayTime = -Math.abs(msValue);
+            const confirmation = `Set advance time to ${formatTime(Math.abs(currentState.delayTime))} (${Math.abs(currentState.delayTime)}ms). This will move subtitles EARLIER. Do you want to proceed with this setting?`;
+            currentState.pendingConfirmation = {
+                action: 'advance',
+                value: Math.abs(currentState.delayTime),
+                direction: 'earlier'
+            };
+            return confirmation;
+        }
+
+        function reverseDelayTime() {
+            if (currentState.delayTime === 0) {
+                return 'No delay time set to reverse.';
+            }
+            
+            currentState.delayTime = -currentState.delayTime;
+            const direction = currentState.delayTime > 0 ? 'LATER' : 'EARLIER';
+            const absValue = Math.abs(currentState.delayTime);
+            
+            return `Reversed delay time. New setting: ${formatTime(absValue)} (${absValue}ms) to move subtitles ${direction}.`;
+        }
+
+        async function processFiles() {
+            if (currentState.selectedFiles.length === 0 && !currentState.selectedFolder) {
+                return 'No files or folder selected. Please select files or a folder first.';
+            }
+            
+            if (currentState.delayTime === 0) {
+                return 'No delay time set. Please set a delay or advance time first.';
+            }
+
+            try {
+                const result = await ipcRenderer.invoke('process-subtitles', {
+                    files: currentState.selectedFiles,
+                    folder: currentState.selectedFolder,
+                    delayMs: currentState.delayTime
+                });
+                
+                return `Processing completed! ${result.processedCount} files processed successfully.`;
+            } catch (error) {
+                return `Error processing files: ${error.message}`;
+            }
+        }
+
+        function convertToMs(value, unit) {
+            switch (unit.toLowerCase()) {
+                case 's':
+                case 'seconds':
+                    return value * 1000;
+                case 'ms':
+                case 'milliseconds':
+                default:
+                    return value;
+            }
+        }
+
+        function formatTime(ms) {
+            if (ms >= 1000) {
+                return `${ms / 1000}s`;
+            }
+            return `${ms}ms`;
+        }
+
+        async function parseAndExecuteToolCalls(response) {
+            // Define patterns for tool calls
+            const toolPatterns = [
+                { pattern: /\[SELECT_FILES\]/gi, tool: 'select_files', args: {} },
+                { pattern: /\[SELECT_FOLDER\]/gi, tool: 'select_folder', args: {} },
+                { pattern: /\[DELAY_TIME:(\d+(?:\.\d+)?):(\w+)\]/gi, tool: 'delay_time', extractArgs: true },
+                { pattern: /\[ADVANCE_TIME:(\d+(?:\.\d+)?):(\w+)\]/gi, tool: 'advance_time', extractArgs: true },
+                { pattern: /\[REVERSE\]/gi, tool: 'reverse', args: {} },
+                { pattern: /\[PROCESS\]/gi, tool: 'process', args: {} }
+            ];
+
+            let foundTools = false;
+
+            for (const toolDef of toolPatterns) {
+                let match;
+                const pattern = new RegExp(toolDef.pattern.source, toolDef.pattern.flags);
+                
+                while ((match = pattern.exec(response)) !== null) {
+                    foundTools = true;
+                    addMessage(`🔧 Executing: ${toolDef.tool}`, 'system');
+                    
+                    try {
+                        let toolResult;
+                        
+                        if (toolDef.extractArgs && match.length > 1) {
+                            // Extract arguments from regex groups
+                            if (toolDef.tool === 'delay_time' || toolDef.tool === 'advance_time') {
+                                const value = parseFloat(match[1]);
+                                const unit = match[2];
+                                
+                                if (toolDef.tool === 'delay_time') {
+                                    toolResult = setDelayTime(value, unit);
+                                } else {
+                                    toolResult = setAdvanceTime(value, unit);
+                                }
+                            }
+                        } else {
+                            // Execute tool with no arguments
+                            switch (toolDef.tool) {
+                                case 'select_files':
+                                    toolResult = await selectFiles();
+                                    break;
+                                case 'select_folder':
+                                    toolResult = await selectFolder();
+                                    break;
+                                case 'reverse':
+                                    toolResult = reverseDelayTime();
+                                    break;
+                                case 'process':
+                                    toolResult = await processFiles();
+                                    break;
+                            }
+                        }
+                        
+                        if (toolResult) {
+                            addMessage(toolResult, 'ai');
+                        }
+                    } catch (error) {
+                        addMessage(`Error executing ${toolDef.tool}: ${error.message}`, 'system');
+                    }
+                }
+            }
+
+            return foundTools;
+        }
+    </script>
+</body>
+</html> 

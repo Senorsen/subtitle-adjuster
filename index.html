@@ -22,6 +22,7 @@
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
+            position: relative;
         }
         .drop-zone {
             border: 2px dashed #ccc;
@@ -161,10 +162,39 @@
             margin-top: 0;
             flex-shrink: 0;
         }
+        .chat-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .chat-button:hover {
+            background-color: #1976d2;
+        }
+        .chat-button svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <button class="chat-button" id="chatButton">
+            <svg viewBox="0 0 24 24">
+                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+            </svg>
+            Chat
+        </button>
         <h1>Subtitle Adjuster</h1>
         
         <div class="button-group">
@@ -461,6 +491,11 @@
                 status.className = 'status error';
                 status.textContent = error.message;
             }
+        });
+
+        // Add chat button handler
+        document.getElementById('chatButton').addEventListener('click', () => {
+            ipcRenderer.invoke('open-chat');
         });
     </script>
 </body>

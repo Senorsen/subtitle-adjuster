@@ -23,8 +23,8 @@
     "electron-store": "^8.1.0"
   },
   "devDependencies": {
-    "electron": "^28.1.0",
-    "electron-builder": "^24.13.3",
+    "electron": "^36.3.2",
+    "electron-builder": "^26.0.12",
     "ico-endec": "^0.1.6",
     "sharp": "^0.33.2"
   },
