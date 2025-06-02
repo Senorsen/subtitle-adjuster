@@ -930,7 +930,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
             // Sync to other windows
             syncStateToOtherWindows();
             
-            const confirmation = `Set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER.\n\nState: ${getState()}\n\nDo you want to proceed with this setting?`;
+            const confirmation = `Set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER.\nDo you want to proceed with this setting?`;
             currentState.pendingConfirmation = {
                 action: 'delay',
                 value: currentState.delayTime,
@@ -1002,9 +1002,14 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                 // Sync to other windows
                 await syncStateToOtherWindows();
                 
-                const fileDesc = currentState.selectedFiles.length > 0 
-                    ? `${currentState.selectedFiles.length} files` 
-                    : `folder: ${currentState.selectedFolder}`;
+                let fileDesc;
+                if (currentState.selectedFiles.length > 0) {
+                    fileDesc = `${currentState.selectedFiles.length} files`;
+                } else if (currentState.selectedFolder) {
+                    fileDesc = `folder: ${currentState.selectedFolder}`;
+                } else {
+                    fileDesc = 'selected items';
+                }
                 
                 return `Processing completed! ${result.processedCount} files processed successfully.\n\nYour ${fileDesc} are still selected. Would you like to adjust the timing again or process different files?`;
             } catch (error) {
@@ -1137,23 +1142,6 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                             const state = getState();
                             if (state === 'files_or_folder_selected') {
                                 const followUpMessage = 'Perfect! Now I need to know about the timing adjustment. Do you need to:\n\n• **Delay** subtitles (move them later) - if they appear too early\n• **Advance** subtitles (move them earlier) - if they appear too late\n\nPlease tell me which direction and how much time, in seconds and/or milliseconds (e.g., "delay 2 seconds" or "advance 500ms").';
-                                addMessage(followUpMessage, 'ai');
-                                // Add follow-up to conversation history
-                                conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(followUpMessage)) });
-                            }
-                        }, 500);
-                    }
-                    
-                    // Auto follow-up for timing settings
-                    if (toolName === 'DELAY_TIME' || toolName === 'ADVANCE_TIME') {
-                        setTimeout(() => {
-                            const state = getState();
-                            if (state === 'has_timing') {
-                                const fileCount = getFileCount();
-                                const direction = currentState.delayTime > 0 ? 'delaying' : 'advancing';
-                                const timeAmount = Math.abs(currentState.delayTime);
-                                const fileDesc = typeof fileCount === 'number' ? `${fileCount} files` : `the ${fileCount}`;
-                                const followUpMessage = `Perfect! I'm ready to process. Would you like me to process ${fileDesc} by ${direction} ${formatTime(timeAmount)}?\nPlease confirm your choice. Or you can tell me to try again with delay or advance another timing, or reverse the direction.`;
                                 addMessage(followUpMessage, 'ai');
                                 // Add follow-up to conversation history
                                 conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(followUpMessage)) });
