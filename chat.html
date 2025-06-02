@@ -41,14 +41,19 @@
             padding: 10px 15px;
             border-radius: 8px;
             max-width: 80%;
+            width: fit-content;
+            font-size: 13px;
+            line-height: 1.4;
         }
         .user-message {
             background-color: #e3f2fd;
             margin-left: auto;
+            margin-right: 0;
         }
         .ai-message {
             background-color: #f5f5f5;
             margin-right: auto;
+            margin-left: 0;
         }
         .input-container {
             display: flex;
@@ -108,6 +113,82 @@
             background-color: #ffebee;
             color: #c62828;
         }
+        .thinking-message {
+            background-color: #f9f9f9;
+            color: #666;
+            margin-bottom: 15px;
+            margin-right: auto;
+            font-size: 12px;
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            animation: thinking-pulse 1.5s ease-in-out infinite;
+        }
+        .thinking-message.collapsed {
+            max-height: 0;
+            padding: 0;
+            margin: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: all 0.3s ease-out;
+        }
+        @keyframes thinking-pulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+        
+        /* Markdown styling for AI messages */
+        .ai-message strong {
+            font-weight: bold;
+            /* color: #1976d2; */
+        }
+        
+        .ai-message em {
+            font-style: italic;
+            color: #424242;
+        }
+        
+        .ai-message code {
+            background-color: #f5f5f5;
+            color: #d32f2f;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', Consolas, monospace;
+            font-size: 0.9em;
+        }
+        
+        .ai-message ul, .ai-message ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        
+        .ai-message li {
+            margin: 4px 0;
+            line-height: 1.4;
+        }
+        
+        .ai-message ul li {
+            list-style-type: disc;
+        }
+        
+        .ai-message ol li {
+            list-style-type: decimal;
+        }
+        
+        .ai-message .bullet-point {
+            margin: 4px 0;
+            padding-left: 8px;
+        }
+        
+        .ai-message a {
+            color: #1976d2;
+            text-decoration: underline;
+        }
+        
+        .ai-message a:hover {
+            color: #0d47a1;
+        }
     </style>
 </head>
 <body>
@@ -122,13 +203,80 @@
     <script type="module">
         import { CreateMLCEngine } from 'https://esm.run/@mlc-ai/web-llm@0.2.79';
         const { ipcRenderer } = require('electron');
+
+        const model = 'Qwen3-1.7B-q4f32_1-MLC'; // Options: Llama-3.2-1B-Instruct-q4f32_1-MLC, Qwen3-0.6B-q4f32_1-MLC, Qwen3-1.7B-q4f32_1-MLC;
+
         let engine = null;
         let currentState = {
+            state: 'empty',
             selectedFiles: [],
             selectedFolder: null,
             delayTime: 0, // in milliseconds
             pendingConfirmation: null
         };
+        let conversationHistory = []; // Store conversation history
+        let isUpdatingFromSync = false;
+
+        // Listen for state sync from other windows
+        ipcRenderer.on('state-sync', (event, sharedState) => {
+            if (isUpdatingFromSync) return; // Prevent infinite loops
+            
+            // Update current state from shared state
+            if (sharedState.selectedFiles !== undefined) {
+                currentState.selectedFiles = sharedState.selectedFiles || [];
+            }
+            if (sharedState.selectedFolder !== undefined) {
+                currentState.selectedFolder = sharedState.selectedFolder;
+            }
+            if (sharedState.delayTime !== undefined) {
+                currentState.delayTime = sharedState.delayTime || 0;
+            }
+            
+            // Update workflow state
+            updateState();
+            
+            console.log('State synced from main window:', currentState);
+        });
+
+        // Sync state changes to other windows
+        async function syncStateToOtherWindows() {
+            if (isUpdatingFromSync) return;
+            
+            isUpdatingFromSync = true;
+            
+            try {
+                if (currentState.selectedFiles.length > 0) {
+                    await ipcRenderer.invoke('sync-files', currentState.selectedFiles);
+                }
+                if (currentState.selectedFolder) {
+                    await ipcRenderer.invoke('sync-folder', currentState.selectedFolder, currentState.selectedFiles);
+                }
+                if (currentState.delayTime !== 0) {
+                    await ipcRenderer.invoke('sync-timing', currentState.delayTime);
+                }
+            } catch (error) {
+                console.error('Error syncing state:', error);
+            }
+            
+            isUpdatingFromSync = false;
+        }
+
+        // Load initial shared state
+        window.addEventListener('load', async () => {
+            try {
+                const sharedState = await ipcRenderer.invoke('get-shared-state');
+                if (sharedState) {
+                    // Update current state from shared state
+                    currentState.selectedFiles = sharedState.selectedFiles || [];
+                    currentState.selectedFolder = sharedState.selectedFolder;
+                    currentState.delayTime = sharedState.delayTime || 0;
+                    updateState();
+                    console.log('Initial state loaded:', currentState);
+                }
+            } catch (error) {
+                console.error('Error loading initial state:', error);
+            }
+        });
 
         // Initialize the model
         async function initializeModel() {
@@ -159,13 +307,20 @@
                 };
 
                 engine = await CreateMLCEngine(
-                    "Qwen3-0.6B-q4f32_1-MLC",
+                    model,
                     engineConfig
                 );
                 
                 // Immediately dismiss status and show welcome message
                 removeLastSystemMessage();
-                addMessage("Hello! I'm your Subtitle Adjuster AI Assistant. I can help you adjust subtitle timing - whether you need to delay subtitles that appear too early or advance them if they're running late. I can also assist with formatting issues, translation questions, or any other subtitle-related tasks. How can I help you today?", 'ai');
+                const initialAssistantMessage = "Hello! I'm your Subtitle Adjuster AI Assistant. I can help you adjust subtitle timing. Do you have some subtitle files or a folder you want to adjust?";
+                addMessage(initialAssistantMessage, 'ai');
+                
+                // Add initial message to conversation history
+                conversationHistory.push({ 
+                    role: "assistant", 
+                    content: initialAssistantMessage 
+                });
             } catch (error) {
                 updateLastSystemMessage(`Error loading model: ${error.message}`, true);
             }
@@ -184,6 +339,46 @@
         const sendButton = document.getElementById('sendButton');
         const chatMessages = document.getElementById('chatMessages');
 
+        // Helper function to check if chat is scrolled to bottom
+        function isScrolledToBottom() {
+            const threshold = 15; // Increased threshold for better detection
+            const isAtBottom = chatMessages.scrollTop + chatMessages.clientHeight >= chatMessages.scrollHeight - threshold;
+            // console.log('Scroll check:', { scrollTop: chatMessages.scrollTop, clientHeight: chatMessages.clientHeight, scrollHeight: chatMessages.scrollHeight, isAtBottom });
+            return isAtBottom;
+        }
+
+        // Helper function to scroll to bottom only if user was already at bottom
+        function scrollToBottomIfNeeded() {
+            if (isScrolledToBottom()) {
+                requestAnimationFrame(() => {
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                });
+            }
+        }
+
+        // Helper function to force scroll to bottom
+        function forceScrollToBottom() {
+            requestAnimationFrame(() => {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            });
+        }
+
+        // Helper function to scroll to bottom
+        function scrollToBottom() {
+            requestAnimationFrame(() => {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            });
+        }
+
+        // Helper function for better scroll management: check first, then scroll if needed
+        function checkScrollAndUpdate(updateCallback) {
+            const wasAtBottom = isScrolledToBottom();
+            updateCallback();
+            if (wasAtBottom) {
+                scrollToBottom();
+            }
+        }
+
         async function sendMessage() {
             const message = messageInput.value.trim();
             if (!message || !engine) return;
@@ -192,62 +387,307 @@
             addMessage(message, 'user');
             messageInput.value = '';
 
+            // Add user message to conversation history
+            conversationHistory.push({ role: "user", content: message });
+
             // Disable input while processing
             messageInput.disabled = true;
             sendButton.disabled = true;
 
+            await generateAIResponse();
+        }
+
+        async function generateAIResponse() {
             try {
-                // Show processing status
-                addMessage('Generating response...', 'system');
+                // Show thinking status immediately
+                const thinkingPlaceholder = document.createElement('div');
+                thinkingPlaceholder.className = 'message thinking-message';
+                thinkingPlaceholder.textContent = 'Thinking...';
+                chatMessages.appendChild(thinkingPlaceholder);
+                forceScrollToBottom();
 
                 // Create system prompt for the model about available tools
-                const systemPrompt = `You are a Subtitle Adjuster AI Assistant. You help users with subtitle timing adjustments and related tasks.
+                const systemPrompt = `You are a Subtitle Adjuster AI Assistant. You help users with subtitle timing adjustments.
 
-AVAILABLE TOOLS (use these patterns in your response when appropriate):
-- [SELECT_FILES] - Use when user wants to select specific subtitle files (.ass/.srt)
-- [SELECT_FOLDER] - Use when user wants to select a folder containing subtitle files
-- [DELAY_TIME:value:unit] - Use to set delay time (moves subtitles later). Example: [DELAY_TIME:2:s] or [DELAY_TIME:500:ms]
-- [ADVANCE_TIME:value:unit] - Use to set advance time (moves subtitles earlier). Example: [ADVANCE_TIME:1.5:s] or [ADVANCE_TIME:300:ms]
-- [REVERSE] - Use to reverse the current delay/advance direction
-- [PROCESS] - Use to actually process the files after user confirms the settings
+CONTEXT: You previously introduced yourself by saying: "Hello! I'm your Subtitle Adjuster AI Assistant. I can help you adjust subtitle timing. Do you have some subtitle files or a folder you want to adjust?"
 
-TOOL USAGE GUIDELINES:
-1. If user mentions working with subtitle files/folders, intelligently decide between [SELECT_FILES] or [SELECT_FOLDER]
-2. If unclear whether they want files or folder, ASK first before calling any tool
-3. When user mentions timing adjustments (delay/advance), use appropriate timing tools
-4. Always explain what you're doing before using tools
-5. For timing, support both seconds (s) and milliseconds (ms)
-6. Only call [PROCESS] after user explicitly confirms they want to proceed
+STATE TRANSITION WORKFLOW (internal guidance - don't mention state names to user):
+Current state: ${getState()}
+${getState() === 'empty' ? `
+"empty": No files/folder selected, no timing set
+    - When user clearly indicates they want individual files without mentioning a folder (message contains "file" or "files" or "a file" is enough, but do not ask specify the files path in message. For example, "files", or "yes, want to adjust some files", or even just "yes some files") → CALL_TOOL SELECT_FILES
+    - When user clearly indicates they want a folder (message contains "folder" or "folders" or "directory" or "directories" is enough, but do not ask the folder path in message. For example, "folder", or "yes, want to adjust some files in a folder", or "want to process a folder") → CALL_TOOL SELECT_FOLDER
+    - When user gives a POSITIVE answer to the initial question (like "yes", "I do", "sure", etc.) but without specifying the type is files or folder, you MUST ask them to clarify their choice, use exactly this following message, ensure the line breaks and markdown formatting are correct after each sentence and list item:
+     "Great! How would you like to select your subtitle files?
+        
+        - **File(s)** - Choose specific .ass or .srt files
+        - **Folder** - Select a folder containing subtitle files
+        
+        Which option would you prefer?"
+    - DO NOT call any tools yet - wait for user to specify their preference
+    - If user gives negative answer or doesn't answer to the question, just chat normally without asking about files/folders
+` : ''}
+${getState() === 'files_or_folder_selected' ? `
+"files_or_folder_selected": Files or folder chosen, but no timing set
+   - Ask user about timing adjustment (delay/advance and amount)
+   - If user choose to delay and provide a time (tell user to provide in seconds and milliseconds, if both non-zero, they will be added together, don't convert seconds to milliseconds, for example, if user says "1 second and 500 milliseconds", you should call DELAY_TIME:1:500) -> CALL_TOOL DELAY_TIME:{user_provided_time_seconds}:{user_provided_time_milliseconds}
+   - If user choose to advance and provide a time (tell user to provide in seconds and milliseconds, if both non-zero, they will be added together, don't convert seconds to milliseconds, for example, if user says "1 second and 500 milliseconds", you should call ADVANCE_TIME:1:500) -> CALL_TOOL ADVANCE_TIME:{user_provided_time_seconds}:{user_provided_time_milliseconds}
+   - If user choose to reverse the current delay/advance direction -> CALL_TOOL REVERSE
+   - If user choose to process the files -> CALL_TOOL PROCESS
+   - If user choose to cancel the current operation -> CALL_TOOL CANCEL
+   - Current selection: ${hasFilesOrFolder() ? (currentState.selectedFiles.length > 0 ? `${currentState.selectedFiles.length} files` : `folder: ${currentState.selectedFolder}`) : 'none'}
+` : ''}
+${getState() === 'has_timing' ? `
+"has_timing": Files/folder selected AND timing configured
+   - Ask user to confirm processing
+   - Current timing: ${hasTiming() ? `${currentState.delayTime > 0 ? 'delay' : 'advance'} ${formatTime(Math.abs(currentState.delayTime))}` : 'none'}
+   - User can still modify timing (delay/advance/reverse) in this state, and if user asks you to do so, you could still call the tools:
+        - If user choose to delay and provide a time (tell user to provide in seconds and milliseconds, if both non-zero, they will be added together, don't convert seconds to milliseconds, for example, if user says "1 second and 500 milliseconds", you should call DELAY_TIME:1:500) -> CALL_TOOL DELAY_TIME:{user_provided_time_seconds}:{user_provided_time_milliseconds}
+        - If user choose to advance and provide a time (tell user to provide in seconds and milliseconds, if both non-zero, they will be added together, don't convert seconds to milliseconds, for example, if user says "1 second and 500 milliseconds", you should call ADVANCE_TIME:1:500) -> CALL_TOOL ADVANCE_TIME:{user_provided_time_seconds}:{user_provided_time_milliseconds}
+        - If user choose to reverse the current delay/advance direction -> CALL_TOOL REVERSE
+   - If user confirms positively -> CALL_TOOL PROCESS
+   - If user choose to cancel the current operation -> CALL_TOOL CANCEL
+` : ''}
+Important: From any state, user can request to cancel the current operation
+   - CALL_TOOL CANCEL
 
-Current state: ${JSON.stringify(currentState)}
+IMPORTANT: In state "empty", when user says "yes" or similar positive response, DO NOT jump to timing questions. You MUST first ask them to choose between files or folder selection, then wait for their answer before calling any tools.
 
-User message: "${message}"
+TOOL CALLING FORMAT:
+To call a tool, MUST use this format on the FIRST LINE of your response, you can only call one tool per response:
+CALL_TOOL TOOL_NAME
 
-Respond naturally and use tools when appropriate:`;
+Available tools:
+- SELECT_FILES - When user wants to select specific subtitle files
+- SELECT_FOLDER - When user wants to select a folder containing subtitle files  
+- DELAY_TIME:seconds:milliseconds - Set delay time (moves subtitles later). Example: CALL_TOOL DELAY_TIME:2:500
+- ADVANCE_TIME:seconds:milliseconds - Set advance time (moves subtitles earlier). Example: CALL_TOOL ADVANCE_TIME:2:500
+- REVERSE - Reverse the current delay/advance direction
+- PROCESS - Actually process the files after user confirms
+- CANCEL - Cancel file selection and reset all settings
 
-                // Get response from engine using completions API
-                const response = await engine.chat.completions.create({
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: message }
-                    ],
-                    temperature: 0.7,
-                    max_tokens: 1000,
+GUIDELINES:
+1. **ONE TOOL PER MESSAGE**: Use only ONE tool per response, never multiple tools
+2. **Natural conversation**: Don't mention tool names to users - ask about actions instead
+3. **File/folder selection**: 
+   - In "empty" state: First ask user to choose between files or folder, then call appropriate tool
+   - Ask "Would you like to select individual files or a folder?" instead of mentioning tool names
+4. **Timing adjustments**: When user mentions delay/advance, call the appropriate timing tool
+5. **Confirmation required**: Only call PROCESS after user explicitly confirms they want to proceed
+6. **User guidance**: When tools fail, explain what happened and ask how they'd like to proceed
+7. **Cancel/reset**: Call CANCEL when user wants to start over or reset everything
+8. **Do not output internal state to user**: Do not output internal state to user, only output the response to user, and do not mention the state change in the response.
+
+Full current state: ${JSON.stringify(currentState)}
+
+Read through the message history, the newest user message is the last one which is the most important.
+Respond naturally, call ONE tool on the first line when appropriate, and focus on user actions rather than technical tool names.`;
+
+                // Build messages array with system prompt + full conversation history
+                const messages = [
+                    { role: "system", content: systemPrompt },
+                    ...conversationHistory
+                ];
+
+                // Console logging for debugging - what we're sending to AI
+                console.log('=== MESSAGES SENT TO AI ===');
+                console.log(messages);
+                console.log('=== CURRENT STATE ===');
+                console.log(currentState);
+                console.log('========================');
+
+                // Get response from engine using streaming API
+                const stream = await engine.chat.completions.create({
+                    messages,
+                    temperature: 1,
+                    max_tokens: 32768,
+                    stream: true
                 });
 
-                // Remove the "Generating response..." message
-                removeLastSystemMessage();
+                // Create thinking message element (initially hidden)
+                const thinkingDiv = document.createElement('div');
+                thinkingDiv.className = 'message thinking-message';
+                thinkingDiv.textContent = '';
+                thinkingDiv.style.display = 'none';
+                chatMessages.appendChild(thinkingDiv);
+                
+                // Create AI message element for streaming (initially hidden)
+                const aiMessageDiv = document.createElement('div');
+                aiMessageDiv.className = 'message ai-message';
+                aiMessageDiv.textContent = '';
+                aiMessageDiv.style.display = 'none';
+                chatMessages.appendChild(aiMessageDiv);
+                
+                let fullResponse = '';
+                let isInThinkBlock = false;
+                let thinkContent = '';
+                let realContent = '';
+                let hasShownThinking = false;
+                let hasStartedContent = false;
+                
+                // Process streaming response
+                for await (const chunk of stream) {
+                    const delta = chunk.choices[0]?.delta;
+                    if (delta?.content) {
+                        // Remove thinking placeholder as soon as any content appears
+                        if (!hasStartedContent) {
+                            hasStartedContent = true;
+                            if (thinkingPlaceholder.parentNode) {
+                                thinkingPlaceholder.remove();
+                            }
+                        }
+                        
+                        fullResponse += delta.content;
+                        
+                        // Check for think tags
+                        if (fullResponse.includes('<think>') && !isInThinkBlock) {
+                            isInThinkBlock = true;
+                            hasShownThinking = true;
+                            
+                            checkScrollAndUpdate(() => {
+                                thinkingDiv.style.display = 'block';
+                                // Extract content after <think>
+                                const thinkStart = fullResponse.indexOf('<think>') + 7;
+                                thinkContent = fullResponse.substring(thinkStart);
+                                thinkingDiv.textContent = thinkContent;
+                            });
+                        } else if (isInThinkBlock && !fullResponse.includes('</think>')) {
+                            // Still in think block, update thinking content
+                            checkScrollAndUpdate(() => {
+                                const thinkStart = fullResponse.indexOf('<think>') + 7;
+                                thinkContent = fullResponse.substring(thinkStart);
+                                thinkingDiv.textContent = thinkContent;
+                            });
+                        } else if (fullResponse.includes('</think>') && isInThinkBlock) {
+                            // End of think block
+                            isInThinkBlock = false;
+                            
+                            checkScrollAndUpdate(() => {
+                                // Collapse thinking message
+                                thinkingDiv.classList.add('collapsed');
+                                
+                                // Show real response
+                                aiMessageDiv.style.display = 'block';
+                                
+                                // Extract content after </think> and strip tool calls
+                                const thinkEnd = fullResponse.indexOf('</think>') + 8;
+                                realContent = fullResponse.substring(thinkEnd);
+                                const strippedContent = stripToolCallsFromContent(realContent);
+                                if (strippedContent.trim()) {
+                                    aiMessageDiv.innerHTML = parseMarkdown(strippedContent);
+                                }
+                            });
+                            
+                            // Remove thinking message after animation
+                            setTimeout(() => {
+                                if (thinkingDiv.parentNode) {
+                                    thinkingDiv.remove();
+                                }
+                            }, 300);
+                        } else if (!isInThinkBlock) {
+                            // Regular content (either no think block or after think block)
+                            checkScrollAndUpdate(() => {
+                                if (hasShownThinking) {
+                                    // Extract content after </think> and strip tool calls
+                                    const thinkEnd = fullResponse.indexOf('</think>') + 8;
+                                    realContent = fullResponse.substring(thinkEnd);
+                                    const strippedContent = stripToolCallsFromContent(realContent);
+                                    if (strippedContent.trim()) {
+                                        aiMessageDiv.innerHTML = parseMarkdown(strippedContent);
+                                    }
+                                } else {
+                                    // No think block, strip tool calls and show content directly
+                                    const strippedContent = stripToolCallsFromContent(fullResponse);
+                                    if (strippedContent.trim()) {
+                                        aiMessageDiv.style.display = 'block';
+                                        aiMessageDiv.innerHTML = parseMarkdown(strippedContent);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+                
+                // Get final response and clean up if thinking placeholder still exists
+                fullResponse = await engine.getMessage();
+                if (thinkingPlaceholder.parentNode) {
+                    thinkingPlaceholder.remove();
+                }
+                
+                if (fullResponse.includes('</think>')) {
+                    realContent = fullResponse.substring(fullResponse.indexOf('</think>') + 8);
+                } else {
+                    realContent = fullResponse;
+                }
+                
+                // Final update with tool calls stripped
+                const finalStrippedContent = stripToolCallsFromContent(realContent);
+                if (finalStrippedContent.trim() && aiMessageDiv.style.display === 'none') {
+                    checkScrollAndUpdate(() => {
+                        aiMessageDiv.style.display = 'block';
+                        aiMessageDiv.innerHTML = parseMarkdown(finalStrippedContent);
+                    });
+                } else if (!finalStrippedContent.trim()) {
+                    // Remove the empty message div if content is empty after stripping tool calls
+                    if (aiMessageDiv.parentNode) {
+                        aiMessageDiv.remove();
+                    }
+                }
 
-                const choice = response.choices[0];
-                const aiResponse = choice.message.content;
+                // Console logging for debugging
+                console.log('=== FULL AI RESPONSE ===');
+                console.log(fullResponse);
                 
-                // Add AI response
-                addMessage(aiResponse, 'ai');
+                // Check for faulty response (has <think> but no </think>)
+                if (fullResponse.includes('<think>') && !fullResponse.includes('</think>')) {
+                    console.log('Detected faulty response with unclosed <think> tag, regenerating...');
+                    
+                    // Remove the faulty response from UI
+                    if (thinkingDiv.parentNode) {
+                        thinkingDiv.remove();
+                    }
+                    if (aiMessageDiv.parentNode) {
+                        aiMessageDiv.remove();
+                    }
+                    
+                    // Show regeneration message
+                    addMessage('Response was incomplete, regenerating...', 'system');
+                    
+                    // Don't add faulty response to conversation history
+                    // Regenerate the response
+                    setTimeout(() => {
+                        removeLastSystemMessage();
+                        generateAIResponse();
+                    }, 1000);
+                    
+                    return; // Exit early, don't process the faulty response
+                }
                 
-                // Check for manual tool calls in the response
-                await parseAndExecuteToolCalls(aiResponse);
+                // Check for manual tool calls in the complete response
+                await parseAndExecuteToolCalls(fullResponse);
+                
+                // Add AI response to conversation history (strip think blocks and tool calls)
+                const responseForHistory = stripToolCallsFromContent(stripThinkBlocks(fullResponse));
+                if (responseForHistory.trim()) {
+                    conversationHistory.push({ role: "assistant", content: responseForHistory });
+                }
+                console.log('=== CONVERSATION HISTORY ===');
+                console.log(conversationHistory);
+                console.log('=== END DEBUG OUTPUT ===');
             } catch (error) {
-                updateLastSystemMessage(`Error: ${error.message}`, true);
+                // Remove any partial response and thinking message
+                const lastAiMessage = chatMessages.querySelector('.ai-message:last-of-type');
+                if (lastAiMessage && lastAiMessage.textContent === '') {
+                    lastAiMessage.remove();
+                }
+                
+                // Remove thinking message if it exists
+                const thinkingMessage = chatMessages.querySelector('.thinking-message');
+                if (thinkingMessage) {
+                    thinkingMessage.remove();
+                }
+                
+                addMessage(`Error: ${error.message}`, 'system');
             }
 
             // Re-enable input
@@ -256,37 +696,167 @@ Respond naturally and use tools when appropriate:`;
             messageInput.focus();
         }
 
-        function addMessage(text, sender) {
-            const messageDiv = document.createElement('div');
-            if (sender === 'system') {
-                messageDiv.className = 'message system-message';
-            } else {
-                messageDiv.className = `message ${sender}-message`;
+        // Helper function to strip think blocks from text
+        function stripThinkBlocks(text) {
+            if (!text) return text;
+            
+            // Remove everything between <think> and </think> tags including the tags themselves
+            return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        }
+
+        // Basic markdown parser for AI messages
+        function parseMarkdown(text) {
+            if (!text) return '';
+            
+            // Trim leading and trailing whitespace/newlines
+            text = text.trim();
+            
+            // Process lists first (before other processing)
+            text = parseMarkdownLists(text);
+            
+            // Now process other markdown, but be careful with line breaks
+            text = text
+                // Bold text: **text** or __text__
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/__(.*?)__/g, '<strong>$1</strong>')
+                
+                // Italic text: *text* or _text_ (but not if it's part of a list or bold)
+                .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
+                .replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>')
+                
+                // Inline code: `code`
+                .replace(/`(.*?)`/g, '<code>$1</code>')
+                
+                // Simple links: [text](url)
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>')
+                
+                // Handle line breaks properly:
+                // 1. First handle paragraph breaks (double+ newlines) - convert to single <br>
+                .replace(/\n\s*\n+/g, '<br>')
+                
+                // 2. Then handle remaining single newlines - convert to <br> but not within HTML tags
+                .replace(/\n(?![^<]*>)/g, '<br>');
+            
+            // Remove redundant <br> tags around list elements
+            text = text
+                // Remove <br> before list opening tags
+                .replace(/<br>\s*(<ul>|<ol>)/g, '$1')
+                // Remove <br> after list opening tags
+                .replace(/(<ul>|<ol>)\s*<br>/g, '$1')
+                // Remove <br> before list closing tags
+                .replace(/<br>\s*(<\/ul>|<\/ol>)/g, '$1')
+                // Remove <br> after list closing tags (but keep one for spacing after lists)
+                .replace(/(<\/ul>|<\/ol>)\s*<br>/g, '$1')
+                // Remove <br> before and after list items
+                .replace(/<br>\s*(<li>)/g, '$1')
+                .replace(/(<\/li>)\s*<br>/g, '$1');
+            
+            return text;
+        }
+
+        function parseMarkdownLists(text) {
+            const lines = text.split('\n');
+            const result = [];
+            let inUnorderedList = false;
+            let inOrderedList = false;
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const trimmedLine = line.trim();
+                
+                // Check for unordered list items (- or *)
+                const unorderedMatch = trimmedLine.match(/^[-*]\s+(.+)$/);
+                // Check for ordered list items (1., 2., etc.)
+                const orderedMatch = trimmedLine.match(/^\d+\.\s+(.+)$/);
+                
+                if (unorderedMatch) {
+                    if (!inUnorderedList) {
+                        if (inOrderedList) {
+                            result.push('</ol>');
+                            inOrderedList = false;
+                        }
+                        result.push('<ul>');
+                        inUnorderedList = true;
+                    }
+                    result.push(`<li>${unorderedMatch[1]}</li>`);
+                } else if (orderedMatch) {
+                    if (!inOrderedList) {
+                        if (inUnorderedList) {
+                            result.push('</ul>');
+                            inUnorderedList = false;
+                        }
+                        result.push('<ol>');
+                        inOrderedList = true;
+                    }
+                    result.push(`<li>${orderedMatch[1]}</li>`);
+                } else {
+                    // Not a list item
+                    if (inUnorderedList) {
+                        result.push('</ul>');
+                        inUnorderedList = false;
+                    }
+                    if (inOrderedList) {
+                        result.push('</ol>');
+                        inOrderedList = false;
+                    }
+                    
+                    // Add the line (preserve empty lines as they may be intentional spacing)
+                    result.push(line);
+                }
             }
-            messageDiv.textContent = text;
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Close any open lists
+            if (inUnorderedList) {
+                result.push('</ul>');
+            }
+            if (inOrderedList) {
+                result.push('</ol>');
+            }
+            
+            return result.join('\n');
+        }
+
+        function addMessage(text, sender) {
+            checkScrollAndUpdate(() => {
+                const messageDiv = document.createElement('div');
+                if (sender === 'system') {
+                    messageDiv.className = 'message system-message';
+                    messageDiv.textContent = text;
+                } else {
+                    messageDiv.className = `message ${sender}-message`;
+                    if (sender === 'ai') {
+                        // Parse markdown for AI messages
+                        messageDiv.innerHTML = parseMarkdown(text);
+                    } else {
+                        // Plain text for user messages
+                        messageDiv.textContent = text;
+                    }
+                }
+                chatMessages.appendChild(messageDiv);
+            });
         }
 
         function updateLastSystemMessage(text, isError = false) {
-            const messages = chatMessages.querySelectorAll('.system-message');
-            if (messages.length > 0) {
-                const lastMessage = messages[messages.length - 1];
-                lastMessage.textContent = text;
-                if (isError) {
-                    lastMessage.classList.add('error');
+            checkScrollAndUpdate(() => {
+                const messages = chatMessages.querySelectorAll('.system-message');
+                if (messages.length > 0) {
+                    const lastMessage = messages[messages.length - 1];
+                    lastMessage.textContent = text;
+                    if (isError) {
+                        lastMessage.classList.add('error');
+                    } else {
+                        lastMessage.classList.remove('error');
+                    }
                 } else {
-                    lastMessage.classList.remove('error');
-                }
-            } else {
-                addMessage(text, 'system');
-                if (isError) {
-                    const messages = chatMessages.querySelectorAll('.system-message');
-                    if (messages.length > 0) {
-                        messages[messages.length - 1].classList.add('error');
+                    addMessage(text, 'system');
+                    if (isError) {
+                        const messages = chatMessages.querySelectorAll('.system-message');
+                        if (messages.length > 0) {
+                            messages[messages.length - 1].classList.add('error');
+                        }
                     }
                 }
-            }
+            });
         }
 
         function removeLastSystemMessage() {
@@ -316,7 +886,13 @@ Respond naturally and use tools when appropriate:`;
                 
                 if (result && result.length > 0) {
                     currentState.selectedFiles = result;
-                    return `Selected ${result.length} file(s):\n${result.map(f => `• ${f}`).join('\n')}`;
+                    currentState.selectedFolder = null; // Clear folder selection
+                    updateState();
+                    
+                    // Sync to other windows
+                    await syncStateToOtherWindows();
+                    
+                    return `Selected ${result.length} file(s):\n${result.map(f => `• ${f}`).join('\n')}\n\nState: ${getState()}`;
                 } else {
                     return 'No files selected.';
                 }
@@ -331,7 +907,13 @@ Respond naturally and use tools when appropriate:`;
                 
                 if (result) {
                     currentState.selectedFolder = result;
-                    return `Selected folder: ${result}`;
+                    currentState.selectedFiles = []; // Clear file selection
+                    updateState();
+                    
+                    // Sync to other windows
+                    await syncStateToOtherWindows();
+                    
+                    return `Selected folder: ${result}\n\nState: ${getState()}`;
                 } else {
                     return 'No folder selected.';
                 }
@@ -340,10 +922,15 @@ Respond naturally and use tools when appropriate:`;
             }
         }
 
-        function setDelayTime(value, unit) {
-            const msValue = convertToMs(value, unit);
+        function setDelayTime(seconds, milliseconds) {
+            const msValue = seconds * 1000 + milliseconds;
             currentState.delayTime = Math.abs(msValue);
-            const confirmation = `Set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER. Do you want to proceed with this setting?`;
+            updateState();
+            
+            // Sync to other windows
+            syncStateToOtherWindows();
+            
+            const confirmation = `Set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER.\n\nState: ${getState()}\n\nDo you want to proceed with this setting?`;
             currentState.pendingConfirmation = {
                 action: 'delay',
                 value: currentState.delayTime,
@@ -352,10 +939,15 @@ Respond naturally and use tools when appropriate:`;
             return confirmation;
         }
 
-        function setAdvanceTime(value, unit) {
-            const msValue = convertToMs(value, unit);
+        function setAdvanceTime(seconds, milliseconds) {
+            const msValue = seconds * 1000 + milliseconds;
             currentState.delayTime = -Math.abs(msValue);
-            const confirmation = `Set advance time to ${formatTime(Math.abs(currentState.delayTime))} (${Math.abs(currentState.delayTime)}ms). This will move subtitles EARLIER. Do you want to proceed with this setting?`;
+            updateState();
+            
+            // Sync to other windows
+            syncStateToOtherWindows();
+            
+            const confirmation = `Set advance time to ${formatTime(Math.abs(currentState.delayTime))} (${Math.abs(currentState.delayTime)}ms). This will move subtitles EARLIER.\n\nState: ${getState()}\n\nDo you want to proceed with this setting?`;
             currentState.pendingConfirmation = {
                 action: 'advance',
                 value: Math.abs(currentState.delayTime),
@@ -370,29 +962,51 @@ Respond naturally and use tools when appropriate:`;
             }
             
             currentState.delayTime = -currentState.delayTime;
+            updateState();
+            
+            // Sync to other windows
+            syncStateToOtherWindows();
+            
             const direction = currentState.delayTime > 0 ? 'LATER' : 'EARLIER';
             const absValue = Math.abs(currentState.delayTime);
             
-            return `Reversed delay time. New setting: ${formatTime(absValue)} (${absValue}ms) to move subtitles ${direction}.`;
+            return `Reversed delay time. New setting: ${formatTime(absValue)} (${absValue}ms) to move subtitles ${direction}.\n\nState: ${getState()}`;
         }
 
         async function processFiles() {
-            if (currentState.selectedFiles.length === 0 && !currentState.selectedFolder) {
-                return 'No files or folder selected. Please select files or a folder first.';
-            }
-            
-            if (currentState.delayTime === 0) {
-                return 'No delay time set. Please set a delay or advance time first.';
+            // Validate current state
+            if (getState() !== 'has_timing') {
+                if (!hasFilesOrFolder()) {
+                    return 'No files or folder selected. Please select files or a folder first.';
+                }
+                if (!hasTiming()) {
+                    return 'No delay time set. Please set a delay or advance time first.';
+                }
             }
 
             try {
+                // Set processing status
+                await ipcRenderer.invoke('set-processing-status', 'processing');
+                
                 const result = await ipcRenderer.invoke('process-subtitles', {
                     files: currentState.selectedFiles,
                     folder: currentState.selectedFolder,
                     delayMs: currentState.delayTime
                 });
                 
-                return `Processing completed! ${result.processedCount} files processed successfully.`;
+                // Only reset timing settings, keep files/folder selection
+                currentState.delayTime = 0;
+                currentState.pendingConfirmation = null;
+                updateState();
+                
+                // Sync to other windows
+                await syncStateToOtherWindows();
+                
+                const fileDesc = currentState.selectedFiles.length > 0 
+                    ? `${currentState.selectedFiles.length} files` 
+                    : `folder: ${currentState.selectedFolder}`;
+                
+                return `Processing completed! ${result.processedCount} files processed successfully.\n\nYour ${fileDesc} are still selected. Would you like to adjust the timing again or process different files?`;
             } catch (error) {
                 return `Error processing files: ${error.message}`;
             }
@@ -417,71 +1031,209 @@ Respond naturally and use tools when appropriate:`;
             return `${ms}ms`;
         }
 
+        function cancelSelection() {
+            // Reset all state using the proper function
+            resetToEmpty();
+            
+            // Sync to other windows
+            syncStateToOtherWindows();
+            
+            return `All selections and settings have been cancelled and reset.\n\nState: ${getState()}\n\nYou can start fresh - do you have some subtitle files or a folder you want to adjust?`;
+        }
+
         async function parseAndExecuteToolCalls(response) {
-            // Define patterns for tool calls
-            const toolPatterns = [
-                { pattern: /\[SELECT_FILES\]/gi, tool: 'select_files', args: {} },
-                { pattern: /\[SELECT_FOLDER\]/gi, tool: 'select_folder', args: {} },
-                { pattern: /\[DELAY_TIME:(\d+(?:\.\d+)?):(\w+)\]/gi, tool: 'delay_time', extractArgs: true },
-                { pattern: /\[ADVANCE_TIME:(\d+(?:\.\d+)?):(\w+)\]/gi, tool: 'advance_time', extractArgs: true },
-                { pattern: /\[REVERSE\]/gi, tool: 'reverse', args: {} },
-                { pattern: /\[PROCESS\]/gi, tool: 'process', args: {} }
-            ];
-
-            let foundTools = false;
-
-            for (const toolDef of toolPatterns) {
-                let match;
-                const pattern = new RegExp(toolDef.pattern.source, toolDef.pattern.flags);
+            // Strip think blocks first before parsing tool calls
+            const strippedResponse = stripThinkBlocks(response);
+            
+            // Trim the response after stripping think blocks
+            const trimmedResponse = strippedResponse.trim();
+            
+            // Check if response starts with CALL_TOOL
+            const lines = trimmedResponse.split('\n');
+            
+            // Find the first non-empty line
+            const firstNonEmptyLine = lines.find(line => line.trim() !== '');
+            if (!firstNonEmptyLine || !firstNonEmptyLine.trim().startsWith('CALL_TOOL ')) {
+                return false; // No tool call found
+            }
+            
+            const firstLine = firstNonEmptyLine.trim();
+            
+            // Extract tool name and parameters
+            const toolCall = firstLine.substring(10).trim(); // Remove "CALL_TOOL "
+            let toolName, toolArgs = null;
+            
+            // Check for tools with parameters (DELAY_TIME:seconds:ms or ADVANCE_TIME:seconds:ms)
+            if (toolCall.includes(':')) {
+                const parts = toolCall.split(':');
+                toolName = parts[0];
+                if (parts.length === 3 && (toolName === 'DELAY_TIME' || toolName === 'ADVANCE_TIME')) {
+                    toolArgs = {
+                        seconds: parseFloat(parts[1]),
+                        milliseconds: parseInt(parts[2])
+                    };
+                }
+            } else {
+                toolName = toolCall;
+            }
+            
+            addMessage(`🔧 Executing: ${toolName}`, 'system');
+            
+            try {
+                let toolResult;
                 
-                while ((match = pattern.exec(response)) !== null) {
-                    foundTools = true;
-                    addMessage(`🔧 Executing: ${toolDef.tool}`, 'system');
-                    
-                    try {
-                        let toolResult;
-                        
-                        if (toolDef.extractArgs && match.length > 1) {
-                            // Extract arguments from regex groups
-                            if (toolDef.tool === 'delay_time' || toolDef.tool === 'advance_time') {
-                                const value = parseFloat(match[1]);
-                                const unit = match[2];
-                                
-                                if (toolDef.tool === 'delay_time') {
-                                    toolResult = setDelayTime(value, unit);
-                                } else {
-                                    toolResult = setAdvanceTime(value, unit);
-                                }
-                            }
+                switch (toolName) {
+                    case 'SELECT_FILES':
+                        toolResult = await selectFiles();
+                        break;
+                    case 'SELECT_FOLDER':
+                        toolResult = await selectFolder();
+                        break;
+                    case 'DELAY_TIME':
+                        if (toolArgs) {
+                            toolResult = setDelayTime(toolArgs.seconds, toolArgs.milliseconds);
                         } else {
-                            // Execute tool with no arguments
-                            switch (toolDef.tool) {
-                                case 'select_files':
-                                    toolResult = await selectFiles();
-                                    break;
-                                case 'select_folder':
-                                    toolResult = await selectFolder();
-                                    break;
-                                case 'reverse':
-                                    toolResult = reverseDelayTime();
-                                    break;
-                                case 'process':
-                                    toolResult = await processFiles();
-                                    break;
+                            toolResult = 'Invalid DELAY_TIME parameters';
+                        }
+                        break;
+                    case 'ADVANCE_TIME':
+                        if (toolArgs) {
+                            toolResult = setAdvanceTime(toolArgs.seconds, toolArgs.milliseconds);
+                        } else {
+                            toolResult = 'Invalid ADVANCE_TIME parameters';
+                        }
+                        break;
+                    case 'REVERSE':
+                        toolResult = reverseDelayTime();
+                        break;
+                    case 'PROCESS':
+                        toolResult = await processFiles();
+                        break;
+                    case 'CANCEL':
+                        toolResult = cancelSelection();
+                        break;
+                    default:
+                        toolResult = `Unknown tool: ${toolName}`;
+                        break;
+                }
+                
+                // Check if tool result indicates failure or empty response
+                if (!toolResult || toolResult.includes('No files selected') || toolResult.includes('No folder selected') || toolResult.includes('Error')) {
+                    addMessage(`⚠️ Tool Result: ${toolResult || 'No result returned'}`, 'system');
+                    const failureMessage = 'The tool didn\'t work as expected. Please let me know how you\'d like to proceed - would you like to try again, try a different approach, or do something else?';
+                    addMessage(failureMessage, 'ai');
+                    
+                    // Add failure response to conversation history
+                    conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(failureMessage)) });
+                } else {
+                    addMessage(toolResult, 'ai');
+                    
+                    // Add tool result to conversation history
+                    conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(toolResult)) });
+                    
+                    // Auto follow-up for successful file/folder selection
+                    if (toolName === 'SELECT_FILES' || toolName === 'SELECT_FOLDER') {
+                        setTimeout(() => {
+                            const state = getState();
+                            if (state === 'files_or_folder_selected') {
+                                const followUpMessage = 'Perfect! Now I need to know about the timing adjustment. Do you need to:\n\n• **Delay** subtitles (move them later) - if they appear too early\n• **Advance** subtitles (move them earlier) - if they appear too late\n\nPlease tell me which direction and how much time, in seconds and/or milliseconds (e.g., "delay 2 seconds" or "advance 500ms").';
+                                addMessage(followUpMessage, 'ai');
+                                // Add follow-up to conversation history
+                                conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(followUpMessage)) });
                             }
-                        }
-                        
-                        if (toolResult) {
-                            addMessage(toolResult, 'ai');
-                        }
-                    } catch (error) {
-                        addMessage(`Error executing ${toolDef.tool}: ${error.message}`, 'system');
+                        }, 500);
+                    }
+                    
+                    // Auto follow-up for timing settings
+                    if (toolName === 'DELAY_TIME' || toolName === 'ADVANCE_TIME') {
+                        setTimeout(() => {
+                            const state = getState();
+                            if (state === 'has_timing') {
+                                const fileCount = getFileCount();
+                                const direction = currentState.delayTime > 0 ? 'delaying' : 'advancing';
+                                const timeAmount = Math.abs(currentState.delayTime);
+                                const fileDesc = typeof fileCount === 'number' ? `${fileCount} files` : `the ${fileCount}`;
+                                const followUpMessage = `Perfect! I'm ready to process. Would you like me to process ${fileDesc} by ${direction} ${formatTime(timeAmount)}?\nPlease confirm your choice. Or you can tell me to try again with delay or advance another timing, or reverse the direction.`;
+                                addMessage(followUpMessage, 'ai');
+                                // Add follow-up to conversation history
+                                conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(followUpMessage)) });
+                            }
+                        }, 500);
                     }
                 }
+            } catch (error) {
+                const errorMessage = `❌ Tool Error: ${error.message}`;
+                addMessage(errorMessage, 'system');
+                const errorResponse = 'Something went wrong with that action. Please let me know what you\'d like to do next - would you like to try again or try a different approach?';
+                addMessage(errorResponse, 'ai');
+                
+                // Add error response to conversation history
+                conversationHistory.push({ role: "assistant", content: stripToolCallsFromContent(stripThinkBlocks(errorResponse)) });
             }
+            
+            return true; // Tool was executed
+        }
 
-            return foundTools;
+        // State management functions
+        function getState() {
+            return currentState.state;
+        }
+
+        function hasFilesOrFolder() {
+            return currentState.selectedFiles.length > 0 || currentState.selectedFolder !== null;
+        }
+
+        function hasTiming() {
+            return currentState.delayTime !== 0;
+        }
+
+        function updateState() {
+            if (!hasFilesOrFolder() && !hasTiming()) {
+                currentState.state = 'empty';
+            } else if (hasFilesOrFolder() && !hasTiming()) {
+                currentState.state = 'files_or_folder_selected';
+            } else if (hasFilesOrFolder() && hasTiming()) {
+                currentState.state = 'has_timing';
+            }
+        }
+
+        function resetToEmpty() {
+            currentState.selectedFiles = [];
+            currentState.selectedFolder = null;
+            currentState.delayTime = 0;
+            currentState.pendingConfirmation = null;
+            currentState.state = 'empty';
+        }
+
+        function getFileCount() {
+            if (currentState.selectedFiles.length > 0) {
+                return currentState.selectedFiles.length;
+            }
+            if (currentState.selectedFolder) {
+                return 'folder';
+            }
+            return 0;
+        }
+
+        // Helper function to strip tool calls from content
+        function stripToolCallsFromContent(content) {
+            if (!content) return '';
+            
+            // Split content into lines
+            const lines = content.split('\n');
+            const filteredLines = [];
+            
+            for (const line of lines) {
+                const trimmedLine = line.trim();
+                // Skip lines that start with CALL_TOOL
+                if (!trimmedLine.startsWith('CALL_TOOL ')) {
+                    filteredLines.push(line);
+                }
+            }
+            
+            return filteredLines.join('\n').trim();
         }
     </script>
 </body>
 </html> 
+
