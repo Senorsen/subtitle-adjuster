@@ -553,14 +553,14 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                                 thinkingDiv.style.display = 'block';
                                 // Extract content after <think>
                                 const thinkStart = fullResponse.indexOf('<think>') + 7;
-                                thinkContent = fullResponse.substring(thinkStart);
+                                thinkContent = fullResponse.substring(thinkStart).trim();
                                 thinkingDiv.textContent = thinkContent;
                             });
                         } else if (isInThinkBlock && !fullResponse.includes('</think>')) {
                             // Still in think block, update thinking content
                             checkScrollAndUpdate(() => {
                                 const thinkStart = fullResponse.indexOf('<think>') + 7;
-                                thinkContent = fullResponse.substring(thinkStart);
+                                thinkContent = fullResponse.substring(thinkStart).trim();
                                 thinkingDiv.textContent = thinkContent;
                             });
                         } else if (fullResponse.includes('</think>') && isInThinkBlock) {
