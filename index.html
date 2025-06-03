@@ -160,6 +160,13 @@
             margin-top: 0;
             flex-shrink: 0;
         }
+        .version {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: -10px;
+            margin-bottom: 20px;
+            flex-shrink: 0;
+        }
         .chat-button {
             position: absolute;
             top: 25px;
@@ -227,6 +234,7 @@
             <span>Chat</span>
         </button>
         <h1>Subtitle Adjuster</h1>
+        <div class="version" id="appVersion"></div>
         
         <div class="button-group">
             <button id="selectFile">Select File(s)</button>
@@ -304,7 +312,7 @@
             
             // Update processing status
             if (sharedState.processingStatus) {
-                updateProcessingStatus(sharedState.processingStatus);
+                updateProcessingStatus(sharedState.processingStatus, sharedState);
             }
             
             updateProcessButtonState();
@@ -328,7 +336,7 @@
             }
         }
 
-        function updateProcessingStatus(status) {
+        function updateProcessingStatus(status, sharedState) {
             const statusElement = document.getElementById('status');
             const processButton = document.getElementById('process');
             
@@ -341,7 +349,12 @@
                     break;
                 case 'completed':
                     statusElement.className = 'status success';
-                    statusElement.textContent = 'Processing completed successfully!';
+                    if (sharedState && sharedState.lastProcessingResult) {
+                        const result = sharedState.lastProcessingResult;
+                        statusElement.textContent = `${result.processedCount} file${result.processedCount !== 1 ? 's' : ''} processed successfully - ${result.timingInfo}`;
+                    } else {
+                        statusElement.textContent = 'Processing completed successfully!';
+                    }
                     statusElement.style.display = 'block';
                     processButton.disabled = false;
                     break;
@@ -665,6 +678,16 @@
             chatWindowOpen = false;
             updateChatButtonText();
         });
+
+        // Load and display app version
+        function loadAppVersion() {
+            ipcRenderer.invoke('get-app-version').then(version => {
+                document.getElementById('appVersion').textContent = `v${version}`;
+            });
+        }
+
+        // Load version on page load
+        loadAppVersion();
     </script>
 </body>
-</html> 
+</html>

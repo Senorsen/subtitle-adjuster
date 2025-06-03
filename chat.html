@@ -44,6 +44,10 @@
             width: fit-content;
             font-size: 13px;
             line-height: 1.4;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+            white-space: pre-wrap;
         }
         .user-message {
             background-color: #e3f2fd;
@@ -417,7 +421,7 @@ ${getState() === 'empty' ? `
 "empty": No files/folder selected, no timing set
     - When user clearly indicates they want individual files without mentioning a folder (message contains "file" or "files" or "a file" is enough, but do not ask specify the files path in message. For example, "files", or "yes, want to adjust some files", or even just "yes some files") → CALL_TOOL SELECT_FILES
     - When user clearly indicates they want a folder (message contains "folder" or "folders" or "directory" or "directories" is enough, but do not ask the folder path in message. For example, "folder", or "yes, want to adjust some files in a folder", or "want to process a folder") → CALL_TOOL SELECT_FOLDER
-    - When user gives a POSITIVE answer to the initial question (like "yes", "I do", "sure", etc.) but without specifying the type is files or folder, you MUST ask them to clarify their choice, use exactly this following message, ensure the line breaks and markdown formatting are correct after each sentence and list item:
+    - When user gives a POSITIVE answer to the initial question (like "yes", "I do", "sure", etc.) but without specifying the type is files or folder, you MUST ask them to clarify their choice, use exactly this following message (but you could translate if another language is detected), ensure the line breaks and markdown formatting are correct after each sentence and list item:
      "Great! How would you like to select your subtitle files?
         
         - **File(s)** - Choose specific .ass or .srt files
@@ -477,6 +481,7 @@ GUIDELINES:
 6. **User guidance**: When tools fail, explain what happened and ask how they'd like to proceed
 7. **Cancel/reset**: Call CANCEL when user wants to start over or reset everything
 8. **Do not output internal state to user**: Do not output internal state to user, only output the response to user, and do not mention the state change in the response.
+9. **Language**: By default use English, but if user says otherwise, use their language.
 
 Full current state: ${JSON.stringify(currentState)}
 
@@ -499,7 +504,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                 // Get response from engine using streaming API
                 const stream = await engine.chat.completions.create({
                     messages,
-                    temperature: 1,
+                    temperature: 0.6,
                     max_tokens: 32768,
                     stream: true
                 });
@@ -572,8 +577,8 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                                 // Extract content after </think> and strip tool calls
                                 const thinkEnd = fullResponse.indexOf('</think>') + 8;
                                 realContent = fullResponse.substring(thinkEnd);
-                                const strippedContent = stripToolCallsFromContent(realContent);
-                                if (strippedContent.trim()) {
+                                const strippedContent = stripToolCallsFromContent(realContent).trim();
+                                if (strippedContent) {
                                     aiMessageDiv.innerHTML = parseMarkdown(strippedContent);
                                 }
                             });
@@ -592,13 +597,13 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                                     const thinkEnd = fullResponse.indexOf('</think>') + 8;
                                     realContent = fullResponse.substring(thinkEnd);
                                     const strippedContent = stripToolCallsFromContent(realContent);
-                                    if (strippedContent.trim()) {
+                                    if (strippedContent && strippedContent.replace(/\s/g, '').length > 0) {
                                         aiMessageDiv.innerHTML = parseMarkdown(strippedContent);
                                     }
                                 } else {
                                     // No think block, strip tool calls and show content directly
                                     const strippedContent = stripToolCallsFromContent(fullResponse);
-                                    if (strippedContent.trim()) {
+                                    if (strippedContent && strippedContent.replace(/\s/g, '').length > 0) {
                                         aiMessageDiv.style.display = 'block';
                                         aiMessageDiv.innerHTML = parseMarkdown(strippedContent);
                                     }
@@ -622,12 +627,19 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                 
                 // Final update with tool calls stripped
                 const finalStrippedContent = stripToolCallsFromContent(realContent);
-                if (finalStrippedContent.trim() && aiMessageDiv.style.display === 'none') {
+                
+                // Debug logging to track content preservation
+                console.log('=== CONTENT PROCESSING DEBUG ===');
+                console.log('Original realContent:', JSON.stringify(realContent));
+                console.log('Final stripped content:', JSON.stringify(finalStrippedContent));
+                console.log('================================');
+                
+                if (finalStrippedContent) {
                     checkScrollAndUpdate(() => {
                         aiMessageDiv.style.display = 'block';
                         aiMessageDiv.innerHTML = parseMarkdown(finalStrippedContent);
                     });
-                } else if (!finalStrippedContent.trim()) {
+                } else {
                     // Remove the empty message div if content is empty after stripping tool calls
                     if (aiMessageDiv.parentNode) {
                         aiMessageDiv.remove();
@@ -668,7 +680,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                 
                 // Add AI response to conversation history (strip think blocks and tool calls)
                 const responseForHistory = stripToolCallsFromContent(stripThinkBlocks(fullResponse));
-                if (responseForHistory.trim()) {
+                if (responseForHistory && responseForHistory.replace(/\s/g, '').length > 0) {
                     conversationHistory.push({ role: "assistant", content: responseForHistory });
                 }
                 console.log('=== CONVERSATION HISTORY ===');
@@ -701,7 +713,15 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
             if (!text) return text;
             
             // Remove everything between <think> and </think> tags including the tags themselves
-            return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            const result = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            
+            // Debug logging to track content preservation
+            console.log('=== STRIP THINK BLOCKS DEBUG ===');
+            console.log('Original text last 10 chars:', JSON.stringify(text.slice(-10)));
+            console.log('Result text last 10 chars:', JSON.stringify(result.slice(-10)));
+            console.log('================================');
+            
+            return result;
         }
 
         // Basic markdown parser for AI messages
@@ -892,7 +912,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                     // Sync to other windows
                     await syncStateToOtherWindows();
                     
-                    return `Selected ${result.length} file(s):\n${result.map(f => `• ${f}`).join('\n')}\n\nState: ${getState()}`;
+                    return `Selected ${result.length} file(s):\n${result.map(f => `• ${f}`).join('\n')}`;
                 } else {
                     return 'No files selected.';
                 }
@@ -913,7 +933,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                     // Sync to other windows
                     await syncStateToOtherWindows();
                     
-                    return `Selected folder: ${result}\n\nState: ${getState()}`;
+                    return `Selected folder: ${result.path}\nIncluding ${result.files.length} files:\n${result.files.map(f => `- ${f}`).join('\n')}`;
                 } else {
                     return 'No folder selected.';
                 }
@@ -930,7 +950,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
             // Sync to other windows
             syncStateToOtherWindows();
             
-            const confirmation = `Set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER.\nDo you want to proceed with this setting?`;
+            const confirmation = `Great! We will set delay time to ${formatTime(currentState.delayTime)} (${currentState.delayTime}ms). This will move subtitles LATER.\nPlease confirm do you want to proceed with this setting?`;
             currentState.pendingConfirmation = {
                 action: 'delay',
                 value: currentState.delayTime,
@@ -947,7 +967,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
             // Sync to other windows
             syncStateToOtherWindows();
             
-            const confirmation = `Set advance time to ${formatTime(Math.abs(currentState.delayTime))} (${Math.abs(currentState.delayTime)}ms). This will move subtitles EARLIER.\n\nState: ${getState()}\n\nDo you want to proceed with this setting?`;
+            const confirmation = `Great! We will set advance time to ${formatTime(Math.abs(currentState.delayTime))} (${Math.abs(currentState.delayTime)}ms). This will move subtitles EARLIER.\nPlease confirm do you want to proceed with this setting?`;
             currentState.pendingConfirmation = {
                 action: 'advance',
                 value: Math.abs(currentState.delayTime),
@@ -970,7 +990,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
             const direction = currentState.delayTime > 0 ? 'LATER' : 'EARLIER';
             const absValue = Math.abs(currentState.delayTime);
             
-            return `Reversed delay time. New setting: ${formatTime(absValue)} (${absValue}ms) to move subtitles ${direction}.\n\nState: ${getState()}`;
+            return `Reversed delay time. New setting: ${formatTime(absValue)} (${absValue}ms) to move subtitles ${direction}.`;
         }
 
         async function processFiles() {
@@ -1011,7 +1031,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
                     fileDesc = 'selected items';
                 }
                 
-                return `Processing completed! ${result.processedCount} files processed successfully.\n\nYour ${fileDesc} are still selected. Would you like to adjust the timing again or process different files?`;
+                return `Processing completed! ${result.processedCount} files processed successfully - ${result.timingInfo}.\n\nYour ${fileDesc} are still selected. Would you like to adjust the timing again or process different files?`;
             } catch (error) {
                 return `Error processing files: ${error.message}`;
             }
@@ -1043,7 +1063,7 @@ Respond naturally, call ONE tool on the first line when appropriate, and focus o
             // Sync to other windows
             syncStateToOtherWindows();
             
-            return `All selections and settings have been cancelled and reset.\n\nState: ${getState()}\n\nYou can start fresh - do you have some subtitle files or a folder you want to adjust?`;
+            return `All selections and settings have been cancelled and reset.\nYou can start fresh - do you have some subtitle files or a folder you want to adjust?`;
         }
 
         async function parseAndExecuteToolCalls(response) {

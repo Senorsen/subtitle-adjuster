@@ -130,6 +130,11 @@ function createWindow() {
     ipcMain.handle('get-chat-state', () => {
         return chatWindow && !chatWindow.isDestroyed();
     });
+
+    // Add handler to get app version
+    ipcMain.handle('get-app-version', () => {
+        return app.getVersion();
+    });
 }
 
 function openChatWindow() {
@@ -328,6 +333,7 @@ ipcMain.handle('select-folder', async () => {
             
             // Return in format expected by main window
             return {
+                path: folderPath,
                 files: files,
                 assCount: files.length
             };
@@ -427,12 +433,17 @@ ipcMain.handle('process-subtitles', async (event, { files, folder, delayMs, path
             await processSubtitleFile(file, adjustmentToUse);
         }
         
+        // Format timing information for the message
+        const timingInfo = formatTimingAdjustment(adjustmentToUse);
+        
         // Reset state after successful processing
         updateSharedState({ 
             processingStatus: 'completed',
-            selectedFiles: [],
-            selectedFolder: null,
-            delayTime: 0
+            delayTime: 0,
+            lastProcessingResult: {
+                processedCount: filesToProcess.length,
+                timingInfo: timingInfo
+            }
         });
         
         // Clear processing status after a short delay
@@ -443,7 +454,9 @@ ipcMain.handle('process-subtitles', async (event, { files, folder, delayMs, path
         return { 
             success: true, 
             processedCount: filesToProcess.length,
-            message: `${filesToProcess.length} file${filesToProcess.length !== 1 ? 's' : ''} processed successfully`
+            adjustmentMs: adjustmentToUse,
+            timingInfo: timingInfo,
+            message: `${filesToProcess.length} file${filesToProcess.length !== 1 ? 's' : ''} processed successfully - ${timingInfo}`
         };
     } catch (error) {
         updateSharedState({ processingStatus: 'error' });
@@ -481,6 +494,26 @@ function msToTime(ms, format) {
         const centiseconds = Math.floor((ms % 1000) / 10);
         return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
     }
+}
+
+// Function to format timing adjustment for display
+function formatTimingAdjustment(adjustmentMs) {
+    const absMs = Math.abs(adjustmentMs);
+    const direction = adjustmentMs > 0 ? 'delayed' : 'advanced';
+    
+    const seconds = Math.floor(absMs / 1000);
+    const milliseconds = absMs % 1000;
+    
+    let parts = [];
+    if (seconds > 0) {
+        parts.push(`${seconds}s`);
+    }
+    if (milliseconds > 0) {
+        parts.push(`${milliseconds}ms`);
+    }
+    
+    const timeStr = parts.length > 0 ? parts.join(' and ') : '0ms';
+    return `${direction} ${timeStr}`;
 }
 
 // Function to process a single subtitle file
